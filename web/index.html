@@ -222,8 +222,9 @@
               </button>
               <p class="text-xs text-slate-600">
                 Decoder recovers center, scale, any rotation, and perspective (ellipse +
-                Blaschke rectification) up to a steep tilt; scratches are rebuilt via RS
-                erasures. Extreme grazing angles can still fail.
+                Klein/projective rectification, seeded from the pupil core); scratches are
+                rebuilt via RS erasures and salt-and-pepper noise is mode-filtered out.
+                Extreme grazing angles can still fail.
               </p>
             </div>
           </div>
@@ -234,7 +235,7 @@
           <p>
             IRIS · open source (MIT) · built with zero dependencies.
             <a
-              href="https://github.com"
+              href="https://github.com/AllTerrainDeveloper/iris"
               class="text-slate-400 underline-offset-2 hover:text-indigo-400 hover:underline"
               >source</a
             >

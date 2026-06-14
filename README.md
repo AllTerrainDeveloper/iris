@@ -23,6 +23,26 @@ Two profiles:
 - **v1 mono (`--mono`)** — black & white, **self-clocking** ticks per cell. Lower capacity
   but maximally robust to radial scratches; printer/fax-safe.
 
+## Robustness Lab
+
+The decoder doesn't just read clean renders — it recovers the payload through brutal,
+**combined** distortion: arbitrary rotation, scale, perspective tilt, blur, salt-and-pepper
+noise and scratches, all at once. These are real screenshots from the in-browser
+[Robustness Lab](#website) (`web/`), each fully decoded in well under
+a fifth of a second:
+
+| Perspective + odd rotation | Perspective + blur + 11% noise |
+| :---: | :---: |
+| ![Perspective 0.30 + −44° rotation, decoded](docs/img/perspective-rotation.png) | ![Perspective 0.20 + 2.2px blur + 11% noise, decoded](docs/img/blur-noise-perspective.png) |
+| `persp 0.30 · rot −44°` → ✓ ~90 ms | `scale 0.98× · persp 0.20 · blur 2.2px · noise 11%` → ✓ ~65 ms |
+
+| Rotation + 4 scratches | Everything at once |
+| :---: | :---: |
+| ![130° rotation + 4 scratches, decoded](docs/img/scratches-rotation.png) | ![Rotation, scale, perspective, blur, noise and scratches combined, decoded](docs/img/everything.png) |
+| `rot 130° · 4 scratches` → ✓ ~40 ms | `rot −84° · scale 0.85× · persp 0.25 · blur 1.4px · noise 8% · 2 scratches` → ✓ ~34 ms |
+
+> Drag the sliders yourself — open `web/index.html` (see [below](#website)).
+
 ## Install / run
 
 Requires Node ≥ 18. No `npm install` needed (no dependencies).
