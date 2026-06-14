@@ -6,6 +6,7 @@ import { decodeColorRobust } from "../src/robust.js";
 const $ = (id) => document.getElementById(id);
 const els = {
   text: $("text"),
+  style: $("ctlStyle"),
   canvas: $("labCanvas"),
   run: $("labRun"),
   random: $("labRandom"),
@@ -61,7 +62,7 @@ function renderBase(text) {
       reject(e);
       return;
     }
-    const svg = renderColorSVG(symbol);
+    const svg = renderColorSVG(symbol, { style: els.style.value });
     const D = +svg.match(/width="(\d+)"/)[1];
     const img = new Image();
     const url = URL.createObjectURL(new Blob([svg], { type: "image/svg+xml" }));
@@ -305,6 +306,7 @@ for (const id of ["rot", "scale", "persp", "blur", "noise", "scratch"]) {
 els.run.addEventListener("click", run);
 els.random.addEventListener("click", randomize);
 els.reset.addEventListener("click", reset);
+els.style.addEventListener("change", run); // re-distort + re-decode on style change
 
 syncLabels();
 run();

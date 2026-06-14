@@ -146,7 +146,10 @@ function colorAt(ru, theta, sym) {
   const k = Math.floor((ru - Rp) / dr);
   if (k >= K) return null;
   const dk = (2 * Math.PI) / N[k];
-  const i = Math.floor(theta / dk);
+  // Cell i is CENTERED on angle i·dk (so cell 0 — the registration ray — is centered
+  // on the vertical axis and renders symmetric). Nearest-cell = round, with wrap.
+  let i = Math.round(theta / dk) % N[k];
+  if (i < 0) i += N[k];
   return PALETTE[sym.cells[k][i]];
 }
 
@@ -176,8 +179,19 @@ export function renderColorRaster(sym) {
   return { width: D, height: D, data };
 }
 
-/** Color Symbol -> SVG string. */
-export function renderColorSVG(sym) {
+const svgNum = (n) => n.toFixed(3).replace(/\.?0+$/, "");
+
+/**
+ * Color Symbol -> SVG string. `opts.style` picks the cell aesthetic:
+ *   "slices" (default) — annular sectors filling each cell (max ink → most robust).
+ *   "dots"             — a crisp filled circle at each cell centre.
+ *   "blobs"            — soft radial-gradient circles that overlap and blend.
+ * The pupil bullseye AND the registration ray (segment 0 of every ring) are ALWAYS
+ * drawn solid — they are the decoder's localization/orientation fiducials, and a
+ * dotted ray measurably hurts robustness (see test/robust.test.js).
+ */
+export function renderColorSVG(sym, opts = {}) {
+  const style = opts.style || "slices";
   const p = sym.params;
   const { Rp, dr, K, N, u } = p;
   const D = imageSizePx(K, p);
@@ -186,23 +200,56 @@ export function renderColorSVG(sym) {
     `<svg xmlns="http://www.w3.org/2000/svg" width="${D}" height="${D}" viewBox="0 0 ${D} ${D}">`,
     `<rect width="${D}" height="${D}" fill="#fff"/>`,
   ];
-  // Data cells, grouped by color for compact output.
-  const byColor = HEX.map(() => []);
+  // Blobs need one soft radial gradient per colour (objectBoundingBox so a single
+  // def serves every blob of that colour; the faded rim is what lets them blend).
+  if (style === "blobs") {
+    out.push("<defs>");
+    for (let v = 0; v < HEX.length; v++) {
+      if (v === 7) continue;
+      out.push(
+        `<radialGradient id="iris-blob-${v}">` +
+          `<stop offset="55%" stop-color="${HEX[v]}"/>` +
+          `<stop offset="100%" stop-color="${HEX[v]}" stop-opacity="0"/>` +
+          `</radialGradient>`,
+      );
+    }
+    out.push("</defs>");
+  }
+  const byColor = HEX.map(() => []); // solid shapes, grouped by colour
+  const blobs = []; // gradient-filled circles (their own fill)
   for (let k = 0; k < K; k++) {
     const r0 = (Rp + k * dr) * u;
     const r1 = (Rp + (k + 1) * dr) * u;
     const dk = (2 * Math.PI) / N[k];
+    const rmid = (Rp + k * dr + dr / 2) * u;
     for (let i = 0; i < N[k]; i++) {
       const v = sym.cells[k][i];
       if (v === 7) continue; // white === background, skip
-      byColor[v].push(sector(c, r0, r1, i * dk, (i + 1) * dk));
+      // Slices style, and the registration ray (i===0) in every style, stay solid sectors.
+      // Cell i is centered on angle i·dk, so cell 0's wedge straddles vertical symmetrically.
+      if (style === "slices" || i === 0) {
+        byColor[v].push(sector(c, r0, r1, (i - 0.5) * dk, (i + 0.5) * dk));
+        continue;
+      }
+      const a = i * dk;
+      const cx = svgNum(c + rmid * Math.sin(a));
+      const cy = svgNum(c - rmid * Math.cos(a));
+      const arc = rmid * dk;
+      if (style === "dots") {
+        const R = svgNum(0.42 * Math.min(r1 - r0, arc));
+        byColor[v].push(`<circle cx="${cx}" cy="${cy}" r="${R}"/>`); // inherits group fill
+      } else {
+        const R = svgNum(0.62 * Math.min(r1 - r0, arc)); // larger → neighbours overlap
+        blobs.push(`<circle cx="${cx}" cy="${cy}" r="${R}" fill="url(#iris-blob-${v})"/>`);
+      }
     }
   }
+  if (blobs.length) out.push(`<g>${blobs.join("")}</g>`);
   for (let v = 0; v < HEX.length; v++) {
     if (byColor[v].length) out.push(`<g fill="${HEX[v]}">${byColor[v].join("")}</g>`);
   }
   // Pupil bullseye (black, on top for crisp localization). The registration ray
-  // (segment 0 of every ring) is already drawn above as black cells.
+  // (segment 0 of every ring) is already drawn above as solid black cells.
   out.push(`<g fill="#000">`);
   out.push(`<circle cx="${c}" cy="${c}" r="${Rp * u}"/>`);
   out.push(`<circle cx="${c}" cy="${c}" r="${(Rp - 2) * u}" fill="#fff"/>`);
@@ -252,8 +299,8 @@ export function decodeColor(grid, opts = {}) {
       const rmid = ringMidU(k, p);
       const dk = (2 * Math.PI) / N[k];
       for (let i = 1; i < N[k]; i++) {
-        // skip segment 0 (registration ray)
-        const v = sampleColor(grid, cx, cy, rmid, (i + 0.5) * dk, u);
+        // skip segment 0 (registration ray); cell i is centered on angle i·dk
+        const v = sampleColor(grid, cx, cy, rmid, i * dk, u);
         for (let b = p.bitsPerCell - 1; b >= 0; b--) bits.push((v >> b) & 1);
       }
     }

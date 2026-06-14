@@ -6,6 +6,7 @@ import { encodeColor, renderColorSVG } from "../src/color.js";
 const $ = (id) => document.getElementById(id);
 const els = {
   text: $("text"),
+  style: $("ctlStyle"),
   charCount: $("charCount"),
   capacity: $("capacity"),
   preview: $("preview"),
@@ -61,7 +62,7 @@ function render() {
   }
 
   els.error.classList.add("hidden");
-  const svg = renderColorSVG(symbol);
+  const svg = renderColorSVG(symbol, { style: els.style.value });
   current = { svg, symbol };
   els.preview.innerHTML = svg;
   const svgEl = els.preview.querySelector("svg");
@@ -129,4 +130,5 @@ els.copySvg.addEventListener("click", async () => {
 });
 
 els.text.addEventListener("input", render);
+els.style.addEventListener("change", render);
 render();

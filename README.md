@@ -45,6 +45,17 @@ a fifth of a second:
 
 > Drag the sliders yourself — open `web/index.html` (see [below](#website)).
 
+### Cell styles
+
+Same data, three looks — pick from a dropdown in the generator. Only the *data cells*
+change; the pupil and the orientation ray stay solid (they're the decoder's fiducials),
+so all three decode equally well:
+
+| Slices | Dots | Blobs |
+| :---: | :---: | :---: |
+| ![Slices style](docs/img/style-slices.png) | ![Dots style](docs/img/style-dots.png) | ![Blobs style](docs/img/style-blobs.png) |
+| annular sectors — max ink, most robust | crisp circles | soft gradient circles that blend |
+
 ## Install / run
 
 Requires Node ≥ 18. No `npm install` needed (no dependencies).

@@ -294,16 +294,18 @@ function rayCandidates(m, O, M, ax = 0, ay = 0) {
   for (let b = 0; b < BINS; b++) if (score[b] < T) { start = b; break; }
   const runs = [];
   let inRun = false;
-  let runStart = 0;
+  let runStartI = 0;
   let strength = 0;
   for (let i = 0; i <= BINS; i++) {
     const b = (start + i) % BINS;
     const hi = i < BINS && score[b] >= T;
     if (hi) {
-      if (!inRun) { inRun = true; runStart = b; strength = 0; }
+      if (!inRun) { inRun = true; runStartI = i; strength = 0; }
       strength += score[b];
     } else if (inRun) {
-      runs.push({ theta: (runStart / BINS) * 2 * Math.PI, strength });
+      // The ray is cell 0, centered on theta0, so use the run CENTRE (not its start).
+      const cb = (((start + (runStartI + i - 1) / 2) % BINS) + BINS) % BINS;
+      runs.push({ theta: (cb / BINS) * 2 * Math.PI, strength });
       inRun = false;
     }
   }
@@ -323,7 +325,7 @@ function snapScore(m, p, K, N, O, M, theta0, ax, ay, stride = 1) {
     const dk = (2 * Math.PI) / N[k];
     for (let i = 1; i < N[k]; i++) {
       if (ci++ % stride) continue;
-      const theta = theta0 + (i + 0.5) * dk;
+      const theta = theta0 + i * dk; // cell i centered on i·dk (ray = cell 0 on theta0)
       const [px, py] = mapPoint(O, M, rn * Math.sin(theta), -rn * Math.cos(theta), ax, ay);
       if (cleanAt(m, px, py)) good++;
       total++;
@@ -339,8 +341,7 @@ function rayFrac(m, p, K, N, O, M, theta0, ax, ay) {
   let dark = 0;
   for (let k = 0; k < K; k++) {
     const rn = ringMidU(k, p) / outerU;
-    const dk = (2 * Math.PI) / N[k];
-    const t = theta0 + 0.5 * dk;
+    const t = theta0; // registration ray = cell 0, centered on theta0
     const [px, py] = mapPoint(O, M, rn * Math.sin(t), -rn * Math.cos(t), ax, ay);
     if (idxAt(m, px, py) === 0) dark++;
   }
@@ -456,7 +457,7 @@ function attempt(m, p, K, N, O, M, theta0, ax, ay, damage) {
     const rn = ringMidU(k, p) / outerU;
     const dk = (2 * Math.PI) / N[k];
     for (let i = 1; i < N[k]; i++) {
-      const theta = theta0 + (i + 0.5) * dk;
+      const theta = theta0 + i * dk; // cell i centered on i·dk (ray = cell 0 on theta0)
       const [px, py] = mapPoint(O, M, rn * Math.sin(theta), -rn * Math.cos(theta), ax, ay);
       const v = idxMajority(m, px, py);
       for (let bb = p.bitsPerCell - 1; bb >= 0; bb--) bits.push((v >> bb) & 1);

@@ -84,6 +84,18 @@
               <span id="capacity"></span>
             </div>
 
+            <label for="ctlStyle" class="mt-5 block text-sm font-medium text-slate-300">
+              Cell style
+            </label>
+            <select
+              id="ctlStyle"
+              class="mt-2 w-full rounded-xl border border-slate-700 bg-slate-950/70 px-4 py-2.5 text-sm text-slate-100 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/40"
+            >
+              <option value="slices">Slices — annular sectors (most robust)</option>
+              <option value="dots">Dots — circles</option>
+              <option value="blobs">Blobs — blended circles</option>
+            </select>
+
             <!-- Stats -->
             <dl id="stats" class="mt-5 grid grid-cols-2 gap-3 text-sm">
               <div class="rounded-xl border border-slate-800 bg-slate-950/50 px-4 py-3">
