@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>IRIS · PixiJS blob test</title>
+    <script src="https://cdn.jsdelivr.net/npm/pixi.js@7.4.2/dist/pixi.min.js"></script>
+    <style>
+      body { margin: 0; background: #0f172a; color: #e2e8f0; font-family: monospace; }
+      .wrap { display: flex; gap: 24px; padding: 24px; align-items: flex-start; }
+      .card { background: #fff; padding: 12px; border-radius: 12px; }
+      #host canvas, #host img { width: 420px; height: 420px; display: block; }
+      #result { font-size: 14px; }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="card"><div id="host"></div></div>
+      <div>
+        <div id="result">rendering…</div>
+        <pre id="info"></pre>
+      </div>
+    </div>
+    <script type="module">
+      import { encodeColor } from "../src/color.js";
+      import { decodeColorRobust } from "../src/robust.js";
+      import { renderBlobCanvas, pixiAvailable } from "./pixi-render.js";
+
+      const text = new URLSearchParams(location.search).get("t") || "hello iris";
+      const result = document.getElementById("result");
+      const info = document.getElementById("info");
+      try {
+        if (!pixiAvailable()) throw new Error("PIXI global not found");
+        const sym = encodeColor(text);
+        const canvas = renderBlobCanvas(sym);
+        document.getElementById("host").appendChild(canvas);
+
+        // Decode straight off the rendered canvas.
+        const { width: W, height: H } = canvas;
+        const id = canvas.getContext("2d").getImageData(0, 0, W, H).data;
+        const rgb = new Uint8Array(W * H * 3);
+        for (let i = 0, j = 0; i < id.length; i += 4, j += 3) { rgb[j] = id[i]; rgb[j + 1] = id[i + 1]; rgb[j + 2] = id[i + 2]; }
+        let dec = null;
+        try { dec = decodeColorRobust({ width: W, height: H, data: rgb }); } catch (e) { dec = { err: e.message }; }
+        const okDec = dec && dec.text === text;
+        result.textContent = okDec ? `✓ decodes: "${dec.text}" (K=${dec.params.K})` : `✗ decode failed: ${dec && (dec.err || dec.text)}`;
+        result.dataset.status = okDec ? "ok" : "fail";
+        window.__IRIS_DONE = true;
+        window.__IRIS_DECODE = okDec;
+        info.textContent = `text: ${text}\nsize: ${W}px\nK: ${sym.params.K}\nN: ${sym.params.N.join(", ")}`;
+      } catch (e) {
+        result.textContent = "ERROR: " + e.message;
+        result.dataset.status = "error";
+        window.__IRIS_DONE = true;
+        window.__IRIS_ERR = e.message;
+      }
+    </script>
+  </body>
+</html>

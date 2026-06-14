@@ -54,7 +54,13 @@ so all three decode equally well:
 | Slices | Dots | Blobs |
 | :---: | :---: | :---: |
 | ![Slices style](docs/img/style-slices.png) | ![Dots style](docs/img/style-dots.png) | ![Blobs style](docs/img/style-blobs.png) |
-| annular sectors — max ink, most robust | crisp circles | soft gradient circles that blend |
+| annular sectors — max ink, most robust | crisp circles | glossy **metaballs** (PixiJS / WebGL) |
+
+**Blobs** are rendered by a small **PixiJS** WebGL shader ([`web/pixi-render.js`](./web/pixi-render.js)):
+each cell is an anisotropic metaball that merges *along* its ring into gooey liquid bands
+(colours blending at the necks) but is radially confined so **levels never blend**. Lighting
+comes from the analytic field gradient — seamless across joints — and the cell cores stay
+pure, so even the metaballs decode. SVG handles slices/dots; PixiJS handles blobs.
 
 ## Install / run
 

@@ -2,6 +2,7 @@
 // Browser-safe modules only (no Node APIs). Uses the v2 color profile by
 // default for high capacity (3 bits/cell).
 import { encodeColor, renderColorSVG } from "../src/color.js";
+import { renderBlobCanvas, pixiAvailable } from "./pixi-render.js";
 
 const $ = (id) => document.getElementById(id);
 const els = {
@@ -62,14 +63,26 @@ function render() {
   }
 
   els.error.classList.add("hidden");
-  const svg = renderColorSVG(symbol, { style: els.style.value });
-  current = { svg, symbol };
-  els.preview.innerHTML = svg;
-  const svgEl = els.preview.querySelector("svg");
-  if (svgEl) {
-    svgEl.removeAttribute("width");
-    svgEl.removeAttribute("height");
-    svgEl.classList.add("h-full", "w-full");
+  const style = els.style.value;
+  const svg = renderColorSVG(symbol, { style });
+  current = { svg, symbol, canvas: null };
+  // "blobs" is drawn by the PixiJS WebGL gradient-slice renderer (real interpolated
+  // slices, not an SVG approximation). Other styles use the deterministic SVG.
+  let blobCanvas = null;
+  if (style === "blobs" && pixiAvailable()) blobCanvas = renderBlobCanvas(symbol);
+  if (blobCanvas) {
+    blobCanvas.classList.add("h-full", "w-full");
+    blobCanvas.style.objectFit = "contain";
+    els.preview.replaceChildren(blobCanvas);
+    current.canvas = blobCanvas;
+  } else {
+    els.preview.innerHTML = svg;
+    const svgEl = els.preview.querySelector("svg");
+    if (svgEl) {
+      svgEl.removeAttribute("width");
+      svgEl.removeAttribute("height");
+      svgEl.classList.add("h-full", "w-full");
+    }
   }
 
   const { K, N } = symbol.params;
@@ -99,6 +112,11 @@ els.downloadSvg.addEventListener("click", () => {
 
 els.downloadPng.addEventListener("click", () => {
   if (!current) return;
+  // Blobs are GPU-rendered to a canvas — export it directly.
+  if (current.canvas) {
+    current.canvas.toBlob((blob) => download(blob, `${safeFilename(els.text.value)}.png`), "image/png");
+    return;
+  }
   const scale = 2; // crisp export
   const svgBlob = new Blob([current.svg], { type: "image/svg+xml" });
   const url = URL.createObjectURL(svgBlob);

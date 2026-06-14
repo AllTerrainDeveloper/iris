@@ -28,9 +28,9 @@ export default [
     files: ["bin/**/*.js", "test/**/*.js", "eslint.config.js"],
     languageOptions: { globals: { ...globals.node } },
   },
-  // The web generator runs in the browser (Tailwind is loaded via CDN).
+  // The web generator runs in the browser (Tailwind and PixiJS loaded via CDN).
   {
     files: ["web/**/*.js"],
-    languageOptions: { globals: { ...globals.browser, tailwind: "readonly" } },
+    languageOptions: { globals: { ...globals.browser, tailwind: "readonly", PIXI: "readonly" } },
   },
 ];

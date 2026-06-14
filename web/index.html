@@ -256,6 +256,9 @@
       </div>
     </div>
 
+    <!-- PixiJS (WebGL) — powers the "blobs" gradient-slice renderer. Classic script
+         so the PIXI global is ready before the deferred module scripts run. -->
+    <script src="https://cdn.jsdelivr.net/npm/pixi.js@7.4.2/dist/pixi.min.js"></script>
     <script type="module" src="./app.js"></script>
     <script type="module" src="./lab.js"></script>
   </body>

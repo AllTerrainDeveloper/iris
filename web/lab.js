@@ -2,6 +2,7 @@
 // blur, noise, scratches) and see whether the robust decoder reconstructs it.
 import { encodeColor, renderColorSVG } from "../src/color.js";
 import { decodeColorRobust } from "../src/robust.js";
+import { renderBlobCanvas, pixiAvailable } from "./pixi-render.js";
 
 const $ = (id) => document.getElementById(id);
 const els = {
@@ -61,6 +62,12 @@ function renderBase(text) {
     } catch (e) {
       reject(e);
       return;
+    }
+    // Blobs are drawn by the PixiJS gradient-slice renderer; distortion + decode
+    // then run on that canvas exactly like the SVG-based styles.
+    if (els.style.value === "blobs" && pixiAvailable()) {
+      const c = renderBlobCanvas(symbol, { supersample: 1 }); // native res → fast distort/decode
+      if (c) { resolve({ canvas: c, D: c.width, symbol }); return; }
     }
     const svg = renderColorSVG(symbol, { style: els.style.value });
     const D = +svg.match(/width="(\d+)"/)[1];
