@@ -1,4 +1,6 @@
 # IRIS
+<img width="390" height="168" alt="image" src="https://github.com/user-attachments/assets/79e380c6-9289-40ef-9b4c-f282e7b60154" />
+
 
 > A radial, self-clocking, multiscale optical code — the successor experiment to QR.
 
