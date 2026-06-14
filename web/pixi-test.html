@@ -31,7 +31,10 @@
       try {
         if (!pixiAvailable()) throw new Error("PIXI global not found");
         const sym = encodeColor(text);
+        const t0 = performance.now();
         const canvas = renderBlobCanvas(sym);
+        const renderMs = Math.round(performance.now() - t0);
+        window.__IRIS_MS = renderMs;
         document.getElementById("host").appendChild(canvas);
 
         // Decode straight off the rendered canvas.
@@ -46,7 +49,7 @@
         result.dataset.status = okDec ? "ok" : "fail";
         window.__IRIS_DONE = true;
         window.__IRIS_DECODE = okDec;
-        info.textContent = `text: ${text}\nsize: ${W}px\nK: ${sym.params.K}\nN: ${sym.params.N.join(", ")}`;
+        info.textContent = `text: ${text.slice(0, 30)}\nsize: ${W}px · render ${renderMs}ms\nK: ${sym.params.K}\nN: ${sym.params.N.join(", ")}`;
       } catch (e) {
         result.textContent = "ERROR: " + e.message;
         result.dataset.status = "error";

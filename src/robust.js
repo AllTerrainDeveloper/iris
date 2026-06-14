@@ -21,6 +21,11 @@ import { rsCorrect } from "./rs.js";
 import { bitsToBytes, crc16 } from "./bits.js";
 import { COLOR_PROFILE, SCHEDULES_COLOR, PARITY_LEVELS, parityFor } from "./color.js";
 
+// Monotonic clock for the optional decode budget (browser + Node).
+const now = (typeof performance !== "undefined" && performance.now)
+  ? () => performance.now()
+  : () => Date.now();
+
 const PAL = [
   [0, 0, 0],
   [255, 0, 0],
@@ -612,6 +617,7 @@ function decodePlanar(ctx) {
   for (const { O, M } of [ctx.circle, ctx.ellipse]) {
     const angles = rayCandidates(ctx.maps, O, M);
     for (const K of viableK(ctx.p, M)) {
+      if (now() > ctx.deadline) return null;
       const N = getN(K, ctx.p);
       for (const theta0 of angles) {
         const hit = tryPose(ctx, K, N, O, M, theta0, 0, 0);
@@ -633,6 +639,7 @@ function decodeScratchedRay(ctx) {
     const N = getN(K, ctx.p);
     const stepDeg = Math.max(1.5, 360 / N[K - 1] / 3); // ≤ 240 steps
     for (let deg = 0; deg < 360; deg += stepDeg) {
+      if (now() > ctx.deadline) return null; // out of budget — give up gracefully
       const theta0 = (deg * Math.PI) / 180;
       if (snapScore(ctx.maps, ctx.p, K, N, O, M, theta0, 0, 0, 4) < 0.7) continue; // skip misaligned
       const hit = tryPose(ctx, K, N, O, M, theta0, 0, 0);
@@ -688,6 +695,7 @@ function decodePerspective(ctx) {
   for (const K of schedulesByFit(p, M)) {
     const N = getN(K, p);
     for (const [ax, ay] of offsets) {
+      if (now() > ctx.deadline) return null; // out of budget — give up gracefully
       for (const theta0 of thetaCandidates(maps, p, K, N, O, M, ax, ay)) {
         const hit = tryPose(ctx, K, N, O, M, theta0, ax, ay);
         if (hit) return hit;
@@ -719,6 +727,10 @@ export function decodeColorRobust(grid, opts = {}) {
     circle: { O: [cx, cy], M: [radiusPx, 0, 0, radiusPx] },
     ellipse,
     damage: damageMask(maps, ellipse.O, ellipse.M),
+    // Optional wall-clock budget (ms). The geometry search is exhaustive, so a
+    // hard input (or a large payload) can otherwise run for seconds; interactive
+    // callers (the web Robustness Lab) pass a budget to cap the worst case.
+    deadline: opts.budgetMs > 0 ? now() + opts.budgetMs : Infinity,
   };
 
   const result = decodePlanar(ctx) || decodeScratchedRay(ctx) || decodePerspective(ctx);

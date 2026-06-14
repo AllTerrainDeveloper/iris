@@ -254,7 +254,9 @@ async function run() {
   const t0 = performance.now();
   let res = null;
   try {
-    res = decodeColorRobust(imageDataToGrid(id));
+    // Cap the decode: the geometry search is exhaustive, so a hard/undecodable
+    // frame could otherwise block the page for seconds. Past the budget it bails.
+    res = decodeColorRobust(imageDataToGrid(id), { budgetMs: 800 });
   } catch {
     res = null;
   }
@@ -304,10 +306,17 @@ function reset() {
   run();
 }
 
+// Dragging a slider fires many "input" events; run the heavy distort+decode once
+// the value settles (labels still update live) so the page never stacks decodes.
+let runTimer = null;
+function runDebounced() {
+  clearTimeout(runTimer);
+  runTimer = setTimeout(run, 130);
+}
 for (const id of ["rot", "scale", "persp", "blur", "noise", "scratch"]) {
   els[id].addEventListener("input", () => {
     syncLabels();
-    run();
+    runDebounced();
   });
 }
 els.run.addEventListener("click", run);
