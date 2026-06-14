@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>IRIS — radial code generator</title>
+    <meta
+      name="description"
+      content="Generate IRIS codes — a radial, self-clocking 2D optical code. The successor experiment to QR."
+    />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='none' stroke='%23a78bfa' stroke-width='2'/%3E%3Ccircle cx='16' cy='16' r='7' fill='none' stroke='%23818cf8' stroke-width='2'/%3E%3Ccircle cx='16' cy='16' r='2' fill='%23a78bfa'/%3E%3C/svg%3E"
+    />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            fontFamily: {
+              mono: ["ui-monospace", "SFMono-Regular", "Menlo", "monospace"],
+            },
+          },
+        },
+      };
+    </script>
+    <style>
+      .iris-glow {
+        background: radial-gradient(
+          60% 60% at 50% 0%,
+          rgba(129, 140, 248, 0.18),
+          transparent 70%
+        );
+      }
+      @keyframes spin-slow {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      .spin-slow {
+        animation: spin-slow 40s linear infinite;
+      }
+    </style>
+  </head>
+  <body class="h-full bg-slate-950 text-slate-200 antialiased">
+    <div class="iris-glow min-h-full">
+      <div class="mx-auto max-w-6xl px-5 py-10 sm:py-14">
+        <!-- Header -->
+        <header class="flex flex-col items-center text-center">
+          <div class="flex items-center gap-3">
+            <svg viewBox="0 0 32 32" class="h-9 w-9 spin-slow">
+              <circle cx="16" cy="16" r="14" fill="none" stroke="#a78bfa" stroke-width="2" />
+              <circle cx="16" cy="16" r="9.5" fill="none" stroke="#818cf8" stroke-width="1.5" stroke-dasharray="3 2" />
+              <circle cx="16" cy="16" r="5" fill="none" stroke="#818cf8" stroke-width="2" />
+              <circle cx="16" cy="16" r="1.8" fill="#a78bfa" />
+            </svg>
+            <h1 class="text-3xl font-semibold tracking-tight text-white">IRIS</h1>
+          </div>
+          <p class="mt-3 max-w-xl text-sm text-slate-400">
+            A radial, high-capacity 2D optical code — the successor experiment to QR.
+            8-color cells (3 bits each) scale outward to beat QR's capacity.
+            Type something, get a code. Open source &amp; zero-dependency.
+          </p>
+        </header>
+
+        <!-- Main grid -->
+        <main class="mt-10 grid gap-6 lg:grid-cols-2">
+          <!-- Controls -->
+          <section
+            class="rounded-2xl border border-slate-800 bg-slate-900/60 p-6 shadow-xl backdrop-blur"
+          >
+            <label for="text" class="block text-sm font-medium text-slate-300">
+              Text to encode
+            </label>
+            <textarea
+              id="text"
+              rows="5"
+              class="mt-2 w-full resize-y rounded-xl border border-slate-700 bg-slate-950/70 px-4 py-3 font-mono text-sm text-slate-100 placeholder-slate-500 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/40"
+              placeholder="hello iris"
+            >hello iris</textarea>
+
+            <div class="mt-3 flex items-center justify-between text-xs text-slate-500">
+              <span id="charCount">10 chars</span>
+              <span id="capacity"></span>
+            </div>
+
+            <!-- Stats -->
+            <dl id="stats" class="mt-5 grid grid-cols-2 gap-3 text-sm">
+              <div class="rounded-xl border border-slate-800 bg-slate-950/50 px-4 py-3">
+                <dt class="text-xs uppercase tracking-wide text-slate-500">Rings (K)</dt>
+                <dd id="statRings" class="mt-1 font-mono text-lg text-white">—</dd>
+              </div>
+              <div class="rounded-xl border border-slate-800 bg-slate-950/50 px-4 py-3">
+                <dt class="text-xs uppercase tracking-wide text-slate-500">Cells</dt>
+                <dd id="statSegments" class="mt-1 font-mono text-lg text-white">—</dd>
+              </div>
+              <div class="rounded-xl border border-slate-800 bg-slate-950/50 px-4 py-3">
+                <dt class="text-xs uppercase tracking-wide text-slate-500">Capacity</dt>
+                <dd id="statData" class="mt-1 font-mono text-lg text-white">—</dd>
+              </div>
+              <div class="rounded-xl border border-slate-800 bg-slate-950/50 px-4 py-3">
+                <dt class="text-xs uppercase tracking-wide text-slate-500">ECC parity</dt>
+                <dd id="statParity" class="mt-1 font-mono text-lg text-white">—</dd>
+              </div>
+            </dl>
+
+            <!-- Actions -->
+            <div class="mt-6 flex flex-wrap gap-3">
+              <button
+                id="downloadSvg"
+                class="inline-flex items-center gap-2 rounded-xl bg-indigo-500 px-4 py-2.5 text-sm font-medium text-white shadow-lg shadow-indigo-500/25 transition hover:bg-indigo-400 active:scale-95 disabled:opacity-40"
+              >
+                Download SVG
+              </button>
+              <button
+                id="downloadPng"
+                class="inline-flex items-center gap-2 rounded-xl bg-slate-800 px-4 py-2.5 text-sm font-medium text-slate-100 transition hover:bg-slate-700 active:scale-95 disabled:opacity-40"
+              >
+                Download PNG
+              </button>
+              <button
+                id="copySvg"
+                class="inline-flex items-center gap-2 rounded-xl border border-slate-700 px-4 py-2.5 text-sm font-medium text-slate-300 transition hover:bg-slate-800 active:scale-95 disabled:opacity-40"
+              >
+                Copy SVG
+              </button>
+            </div>
+
+            <p id="error" class="mt-4 hidden rounded-xl bg-rose-500/10 px-4 py-3 text-sm text-rose-300"></p>
+          </section>
+
+          <!-- Preview -->
+          <section class="flex flex-col">
+            <div
+              class="flex flex-1 items-center justify-center rounded-2xl border border-slate-800 bg-slate-900/60 p-6 shadow-xl backdrop-blur"
+            >
+              <div
+                id="preview"
+                class="flex aspect-square w-full max-w-sm items-center justify-center overflow-hidden rounded-xl bg-white p-4 shadow-2xl"
+              ></div>
+            </div>
+            <p class="mt-3 text-center text-xs text-slate-500">
+              Pure black on white · quiet zone included · deterministic
+            </p>
+          </section>
+        </main>
+
+        <!-- Robustness Lab -->
+        <section
+          class="mt-10 rounded-2xl border border-slate-800 bg-slate-900/60 p-6 shadow-xl backdrop-blur"
+        >
+          <div class="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <h2 class="text-lg font-semibold text-white">Robustness Lab</h2>
+              <p class="mt-1 text-sm text-slate-400">
+                Distort the code above and watch the decoder rebuild it — rotation, scale,
+                perspective, blur, noise and scratches, recovered via geometry detection + RS error correction.
+              </p>
+            </div>
+            <div class="mt-3 flex gap-2 sm:mt-0">
+              <button
+                id="labRandom"
+                class="rounded-xl bg-indigo-500 px-4 py-2 text-sm font-medium text-white shadow-lg shadow-indigo-500/25 transition hover:bg-indigo-400 active:scale-95"
+              >
+                🎲 Randomize
+              </button>
+              <button
+                id="labReset"
+                class="rounded-xl border border-slate-700 px-4 py-2 text-sm font-medium text-slate-300 transition hover:bg-slate-800 active:scale-95"
+              >
+                Reset
+              </button>
+            </div>
+          </div>
+
+          <div class="mt-6 grid gap-6 lg:grid-cols-2">
+            <!-- Distorted preview -->
+            <div class="flex flex-col">
+              <div
+                class="flex aspect-square w-full items-center justify-center overflow-hidden rounded-xl bg-white p-3 shadow-2xl"
+              >
+                <canvas id="labCanvas" class="h-full w-full object-contain"></canvas>
+              </div>
+            </div>
+
+            <!-- Controls + result -->
+            <div class="flex flex-col gap-4">
+              <div id="labResult" class="rounded-xl border px-4 py-3 text-sm font-medium">—</div>
+              <p class="-mt-2 text-xs text-slate-500">applied: <span id="labApplied">—</span></p>
+
+              <div class="grid gap-4">
+                <label class="block">
+                  <span class="flex justify-between text-xs text-slate-400">Rotation <span id="valRot" class="font-mono text-slate-300"></span></span>
+                  <input id="ctlRot" type="range" min="-180" max="180" step="1" value="0" class="mt-1 w-full accent-indigo-500" />
+                </label>
+                <label class="block">
+                  <span class="flex justify-between text-xs text-slate-400">Scale <span id="valScale" class="font-mono text-slate-300"></span></span>
+                  <input id="ctlScale" type="range" min="0.4" max="1" step="0.01" value="1" class="mt-1 w-full accent-indigo-500" />
+                </label>
+                <label class="block">
+                  <span class="flex justify-between text-xs text-slate-400">Perspective <span id="valPersp" class="font-mono text-slate-300"></span></span>
+                  <input id="ctlPersp" type="range" min="0" max="0.5" step="0.01" value="0" class="mt-1 w-full accent-indigo-500" />
+                </label>
+                <label class="block">
+                  <span class="flex justify-between text-xs text-slate-400">Blur <span id="valBlur" class="font-mono text-slate-300"></span></span>
+                  <input id="ctlBlur" type="range" min="0" max="4" step="0.1" value="0" class="mt-1 w-full accent-indigo-500" />
+                </label>
+                <label class="block">
+                  <span class="flex justify-between text-xs text-slate-400">Noise <span id="valNoise" class="font-mono text-slate-300"></span></span>
+                  <input id="ctlNoise" type="range" min="0" max="0.3" step="0.01" value="0" class="mt-1 w-full accent-indigo-500" />
+                </label>
+                <label class="block">
+                  <span class="flex justify-between text-xs text-slate-400">Scratches <span id="valScratch" class="font-mono text-slate-300"></span></span>
+                  <input id="ctlScratch" type="range" min="0" max="6" step="1" value="0" class="mt-1 w-full accent-indigo-500" />
+                </label>
+              </div>
+              <button
+                id="labRun"
+                class="rounded-xl bg-slate-800 px-4 py-2.5 text-sm font-medium text-slate-100 transition hover:bg-slate-700 active:scale-95"
+              >
+                Re-run test
+              </button>
+              <p class="text-xs text-slate-600">
+                Decoder recovers center, scale, any rotation, and perspective (ellipse +
+                Blaschke rectification) up to a steep tilt; scratches are rebuilt via RS
+                erasures. Extreme grazing angles can still fail.
+              </p>
+            </div>
+          </div>
+        </section>
+
+        <!-- Footer -->
+        <footer class="mt-12 text-center text-xs text-slate-600">
+          <p>
+            IRIS · open source (MIT) · built with zero dependencies.
+            <a
+              href="https://github.com"
+              class="text-slate-400 underline-offset-2 hover:text-indigo-400 hover:underline"
+              >source</a
+            >
+          </p>
+        </footer>
+      </div>
+    </div>
+
+    <script type="module" src="./app.js"></script>
+    <script type="module" src="./lab.js"></script>
+  </body>
+</html>

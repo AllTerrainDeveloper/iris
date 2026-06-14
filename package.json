@@ -1,0 +1,33 @@
+{
+  "name": "iris-code",
+  "version": "0.1.0",
+  "description": "IRIS — a radial, self-clocking 2D optical code (the successor experiment to QR). Zero-dependency reference implementation.",
+  "license": "MIT",
+  "type": "module",
+  "main": "src/index.js",
+  "exports": "./src/index.js",
+  "bin": {
+    "iris": "bin/iris.js"
+  },
+  "files": [
+    "src",
+    "bin",
+    "AGENTS.md",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "node --test",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix"
+  },
+  "keywords": ["iris", "qr", "barcode", "optical-code", "reed-solomon", "radial"],
+  "engines": {
+    "node": ">=18"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.0.0",
+    "eslint": "^9.0.0",
+    "globals": "^15.0.0"
+  }
+}
