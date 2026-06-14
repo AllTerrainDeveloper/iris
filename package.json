@@ -5,7 +5,13 @@
   "license": "MIT",
   "type": "module",
   "main": "src/index.js",
-  "exports": "./src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./pixi": "./src/pixi-render.js",
+    "./color": "./src/color.js",
+    "./robust": "./src/robust.js",
+    "./package.json": "./package.json"
+  },
   "bin": {
     "iris": "bin/iris.js"
   },

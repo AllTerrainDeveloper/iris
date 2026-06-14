@@ -116,25 +116,43 @@ the repo root, not `web/`, because the page imports `../src`).
 
 ## Library API
 
+Designed to be dropped into another project — **encoder, decoder and render engine are
+each importable on their own.** Subpath exports (`package.json#exports`):
+
 ```js
-import { encode, decode } from "./src/index.js";
+// Core: encode, decoders, SVG/raster renderers — everything but the WebGL engine.
+import {
+  encode, decode,            // high-level (color by default; { mono: true } for v1)
+  encodeColor, decodeColor,  // v2 color profile
+  decodeColorRobust,         // real-world decoder: rotation/perspective/scratch/noise
+  renderColorSVG,            // Symbol -> SVG string (slices | dots | blobs)
+  renderColorRaster,         // Symbol -> RGB grid
+  PALETTE,
+} from "iris-code";
 
 const { svg, grid, symbol } = encode("hello iris");
-// svg    -> SVG string
-// grid   -> { width, height, data: Uint8Array }  (0 = ink, 255 = blank)
-// symbol -> { params, ringBits, meta }
-
-console.log(decode(grid).text); // "hello iris"
+console.log(decode(grid).text);                          // "hello iris"
+console.log(decodeColorRobust(photoGrid, { budgetMs: 800 }).text); // distorted capture
 ```
 
-`encode()` defaults to the **color** profile; pass `{ mono: true }` for v1. `decode()`
-auto-detects (RGB grid → color, grayscale grid → mono).
+```js
+// Render engine (browser/WebGL): the metaball "blobs" renderer.
+import { renderBlobCanvas, pixiAvailable } from "iris-code/pixi";
+import * as PIXI from "pixi.js"; // or load PIXI via a <script> CDN global
 
-Lower-level pieces are exported too: color (`encodeColor`, `renderColorSVG`,
-`renderColorRaster`, `decodeColor`, `PALETTE`), mono (`encodeToSymbol`, `renderSVG`,
-`renderRaster`, `decodeRaster`), raster I/O (`gridToPGM`/`pgmToGrid`,
-`gridToPPM`/`ppmToGrid`), and geometry helpers (`segCounts`, `capacityBits`,
-`imageSizePx`).
+const canvas = renderBlobCanvas(encodeColor("hello iris"), { PIXI });
+document.body.append(canvas); // ready-to-display HTMLCanvasElement
+```
+
+`renderBlobCanvas` takes the `PIXI` instance (or falls back to a global `PIXI`), so IRIS
+stays **zero-dependency** — pixi.js is the consumer's choice. It returns `null` off the
+browser, so you can fall back to `renderColorSVG(sym, { style: "blobs" })`.
+
+The reference web app (`web/app.js`, `web/lab.js`) is itself just these imports plus DOM
+wiring — copy it as a starting point. Also exported: mono (`encodeToSymbol`, `renderSVG`,
+`renderRaster`, `decodeRaster`), raster I/O (`gridToPGM`/`pgmToGrid`, `gridToPPM`/`ppmToGrid`),
+and geometry helpers (`segCounts`, `capacityBits`, `imageSizePx`). Granular subpaths
+`iris-code/color` and `iris-code/robust` are available too.
 
 ## How it works (short version)
 
@@ -160,11 +178,12 @@ src/
   render-svg.js  mono: Symbol -> SVG
   decode.js      mono: grid -> text
   color.js       v2 color: 3-bit cells, palette, encode/render/decode
-  robust.js      robust decode: find center/scale/rotation, then sample + RS
+  robust.js      robust decode: find center/scale/rotation/perspective, then sample + RS
+  pixi-render.js render engine: PixiJS/WebGL metaball "blobs" (iris-code/pixi)
   raster.js      Symbol -> grid; PGM (mono) + PPM (color) I/O
   index.js       public API
 bin/iris.js      CLI
-web/             zero-build Tailwind generator + Robustness Lab
+web/             zero-build Tailwind generator + Robustness Lab (imports src/)
 test/            node:test round-trip, color, capacity, robustness
 ```
 

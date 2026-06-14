@@ -18,6 +18,9 @@ export {
   renderColorRaster,
   decodeColor,
 } from "./color.js";
+// The real-world decoder: recovers center/scale/rotation/perspective + scratches
+// + noise from a distorted RGB grid. Pass { budgetMs } to cap the search time.
+export { decodeColorRobust } from "./robust.js";
 
 import { encodeToSymbol } from "./encode.js";
 import { renderSVG } from "./render-svg.js";

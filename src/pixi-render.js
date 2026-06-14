@@ -12,9 +12,15 @@
 // INDEPENDENT of cell count — so big payloads can't blow up the browser. (The old
 // per-pixel-loops-over-every-cell shader was O(pixels × cells) and would hang.)
 //
-// Uses the global `PIXI` (CDN). Returns null if PIXI is unavailable.
-import { PALETTE } from "../src/color.js";
-import { imageSizePx } from "../src/params.js";
+// PIXI is supplied by the caller: pass `opts.PIXI` (e.g. `import * as PIXI from
+// "pixi.js"`) or rely on a global `PIXI` (CDN <script>). This keeps IRIS itself
+// zero-dependency — pixi.js is the consumer's choice. Returns null if PIXI is
+// unavailable, so callers can fall back to the SVG renderers.
+import { PALETTE } from "./color.js";
+import { imageSizePx } from "./params.js";
+
+const globalPixi = () => (typeof PIXI !== "undefined" ? PIXI : null);
+const resolvePixi = (opts) => (opts && opts.PIXI) || globalPixi();
 
 const RAD_TAN = 1.0; // tangential reach vs angular cell pitch (≤1 keeps cell centres pure)
 const RAD_RAD = 0.49; // radial reach vs ring width — MUST stay < 0.5 (no cross-level blend)
@@ -92,15 +98,13 @@ void main() {
 
 let renderer = null;
 let rKey = "";
-const ok = () => typeof PIXI !== "undefined";
-
 const superSample = (size) => Math.max(1, Math.min(3, Math.round(1200 / size)));
 
-function getRenderer(size, res) {
+function getRenderer(PX, size, res) {
   const key = `${size}@${res}`;
   if (renderer && rKey === key) return renderer;
   if (renderer) renderer.destroy();
-  renderer = new PIXI.Renderer({
+  renderer = new PX.Renderer({
     width: size, height: size, backgroundAlpha: 0, antialias: false,
     resolution: res, autoDensity: false, preserveDrawingBuffer: true,
   });
@@ -111,7 +115,7 @@ function getRenderer(size, res) {
 const P = (cx, cy, r, a) => [cx + r * Math.sin(a), cy - r * Math.cos(a)];
 
 // Batched geometry: 6 vertices (2 triangles) per blob, no index buffer.
-function buildAccMesh(blobs) {
+function buildAccMesh(PX, blobs) {
   const n = blobs.length;
   const CORNERS = [[-1, -1], [1, -1], [1, 1], [-1, -1], [1, 1], [-1, 1]];
   const corner = new Float32Array(n * 6 * 2);
@@ -130,15 +134,15 @@ function buildAccMesh(blobs) {
       color[o3] = b.rgb[0] / 255; color[o3 + 1] = b.rgb[1] / 255; color[o3 + 2] = b.rgb[2] / 255;
     }
   }
-  const geometry = new PIXI.Geometry()
+  const geometry = new PX.Geometry()
     .addAttribute("aCorner", corner, 2)
     .addAttribute("aCenter", center, 2)
     .addAttribute("aRadial", radial, 2)
     .addAttribute("aRadii", radii, 2)
     .addAttribute("aColor", color, 3);
-  const shader = PIXI.Shader.from(ACC_VERT, ACC_FRAG, {});
-  const mesh = new PIXI.Mesh(geometry, shader);
-  mesh.state.blendMode = PIXI.BLEND_MODES.ADD; // additive accumulation
+  const shader = PX.Shader.from(ACC_VERT, ACC_FRAG, {});
+  const mesh = new PX.Mesh(geometry, shader);
+  mesh.state.blendMode = PX.BLEND_MODES.ADD; // additive accumulation
   return mesh;
 }
 
@@ -162,10 +166,10 @@ function buildBlobs(sym, size) {
   return blobs;
 }
 
-function buildFiducials(sym, size) {
+function buildFiducials(PX, sym, size) {
   const { Rp, dr, K, N, u } = sym.params;
   const c = size / 2;
-  const g = new PIXI.Graphics();
+  const g = new PX.Graphics();
   // Registration ray: solid continuous wedge per ring.
   for (let k = 0; k < K; k++) {
     const r0 = (Rp + k * dr) * u, r1 = (Rp + (k + 1) * dr) * u, dk = (2 * Math.PI) / N[k];
@@ -184,34 +188,40 @@ function buildFiducials(sym, size) {
   return g;
 }
 
-/** Render the blob (metaball) style to a fresh white canvas, or null if no PIXI. */
+/**
+ * Render the blob (metaball) style to a fresh white canvas. `sym` is an
+ * `encodeColor(...)` symbol. Pass `opts.PIXI` (a pixi.js module/namespace) or
+ * rely on a global `PIXI`; `opts.supersample` overrides the auto factor. Returns
+ * an HTMLCanvasElement, or null if PIXI is unavailable (browser only).
+ */
 export function renderBlobCanvas(sym, opts = {}) {
-  if (!ok()) return null;
+  const PX = resolvePixi(opts);
+  if (!PX) return null;
   const size = imageSizePx(sym.params.K, sym.params);
   const res = opts.supersample || superSample(size);
-  const r = getRenderer(size, res);
+  const r = getRenderer(PX, size, res);
 
   // Pass 1 — accumulate the field into a float render texture.
-  const accRT = PIXI.RenderTexture.create({
+  const accRT = PX.RenderTexture.create({
     width: size, height: size, resolution: res,
-    format: PIXI.FORMATS.RGBA, type: PIXI.TYPES.HALF_FLOAT, scaleMode: PIXI.SCALE_MODES.NEAREST,
+    format: PX.FORMATS.RGBA, type: PX.TYPES.HALF_FLOAT, scaleMode: PX.SCALE_MODES.NEAREST,
   });
-  const accMesh = buildAccMesh(buildBlobs(sym, size));
+  const accMesh = buildAccMesh(PX, buildBlobs(sym, size));
   r.render(accMesh, { renderTexture: accRT, clear: true });
 
   // Pass 2 — composite (threshold + gradient shading) with solid fiducials on top.
-  const comp = new PIXI.Mesh(
-    new PIXI.Geometry()
+  const comp = new PX.Mesh(
+    new PX.Geometry()
       .addAttribute("aVertexPosition", [0, 0, size, 0, size, size, 0, size], 2)
       .addAttribute("aUv", [0, 0, 1, 0, 1, 1, 0, 1], 2)
       .addIndex([0, 1, 2, 0, 2, 3]),
-    PIXI.Shader.from(COMP_VERT, COMP_FRAG, {
+    PX.Shader.from(COMP_VERT, COMP_FRAG, {
       uAccum: accRT, uTexel: [1 / (size * res), 1 / (size * res)],
       uThreshold: THRESHOLD, uGradScale: GRAD_SCALE,
     }),
   );
-  const stage = new PIXI.Container();
-  stage.addChild(comp, buildFiducials(sym, size));
+  const stage = new PX.Container();
+  stage.addChild(comp, buildFiducials(PX, sym, size));
   const gpu = r.extract.canvas(stage);
 
   accRT.destroy(true);
@@ -228,4 +238,5 @@ export function renderBlobCanvas(sym, opts = {}) {
   return out;
 }
 
-export const pixiAvailable = ok;
+/** True if a PIXI instance is available (via `opts.PIXI` or a global `PIXI`). */
+export const pixiAvailable = (opts) => !!resolvePixi(opts);

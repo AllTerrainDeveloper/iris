@@ -23,7 +23,7 @@
     <script type="module">
       import { encodeColor } from "../src/color.js";
       import { decodeColorRobust } from "../src/robust.js";
-      import { renderBlobCanvas, pixiAvailable } from "./pixi-render.js";
+      import { renderBlobCanvas, pixiAvailable } from "../src/pixi-render.js";
 
       const text = new URLSearchParams(location.search).get("t") || "hello iris";
       const result = document.getElementById("result");

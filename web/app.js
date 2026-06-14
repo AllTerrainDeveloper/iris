@@ -2,7 +2,7 @@
 // Browser-safe modules only (no Node APIs). Uses the v2 color profile by
 // default for high capacity (3 bits/cell).
 import { encodeColor, renderColorSVG } from "../src/color.js";
-import { renderBlobCanvas, pixiAvailable } from "./pixi-render.js";
+import { renderBlobCanvas, pixiAvailable } from "../src/pixi-render.js";
 
 const $ = (id) => document.getElementById(id);
 const els = {

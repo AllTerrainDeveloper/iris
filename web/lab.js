@@ -2,7 +2,7 @@
 // blur, noise, scratches) and see whether the robust decoder reconstructs it.
 import { encodeColor, renderColorSVG } from "../src/color.js";
 import { decodeColorRobust } from "../src/robust.js";
-import { renderBlobCanvas, pixiAvailable } from "./pixi-render.js";
+import { renderBlobCanvas, pixiAvailable } from "../src/pixi-render.js";
 
 const $ = (id) => document.getElementById(id);
 const els = {
