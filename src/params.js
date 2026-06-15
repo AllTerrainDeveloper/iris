@@ -43,6 +43,19 @@ export function capacityBits(K, p = DEFAULT_PROFILE) {
   return segCounts(K, p).reduce((a, b) => a + b, 0);
 }
 
+/**
+ * Mono-profile RS layout for segment counts `N` (AGENTS.md §2.6): raw capacity,
+ * codeword length, parity bytes (30% default) and usable data bytes. The encoder
+ * and decoder MUST agree on these byte counts for a clean render to round-trip,
+ * so the arithmetic lives here once rather than being repeated in each pipeline.
+ */
+export function monoLayout(N, p = DEFAULT_PROFILE) {
+  const cap = N.reduce((a, b) => a + b, 0);
+  const totalBytes = Math.floor(cap / 8);
+  const parity = Math.max(2, Math.round(totalBytes * p.parity));
+  return { cap, totalBytes, parity, dataBytes: totalBytes - parity };
+}
+
 /** Square image side in pixels for a symbol with K rings (AGENTS.md §2.1). */
 export function imageSizePx(K, p = DEFAULT_PROFILE) {
   const radiusU = p.Rp + K * p.dr + p.quiet;

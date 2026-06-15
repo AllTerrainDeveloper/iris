@@ -2,7 +2,7 @@
 // render produced by iris-render. The decoder doesn't know the ring schedule up
 // front, so it tries each candidate K and accepts the one whose RS + CRC verify.
 
-import { DEFAULT_PROFILE, SCHEDULES, segCounts, ringMidU } from "./params.js";
+import { DEFAULT_PROFILE, SCHEDULES, segCounts, ringMidU, monoLayout } from "./params.js";
 import { rsCorrect } from "./rs.js";
 import { bitsToBytes } from "./bits.js";
 import { readFrame } from "./frame.js";
@@ -53,11 +53,8 @@ export function decodeRaster(grid, opts = {}) {
       }
     }
 
-    const cap = N.reduce((a, b) => a + b, 0);
-    const totalBytes = Math.floor(cap / 8);
-    const parity = Math.max(2, Math.round(totalBytes * p.parity));
+    const { totalBytes, parity, dataBytes } = monoLayout(N, p);
     if (parity >= totalBytes) continue;
-    const dataBytes = totalBytes - parity;
 
     const code = bitsToBytes(bits.slice(0, totalBytes * 8));
     const corrected = rsCorrect(code, parity);

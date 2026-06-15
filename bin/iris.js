@@ -64,7 +64,7 @@ function cmdEncode(args) {
 function report(out, symbol, text, profile) {
   const { K, N } = symbol.params;
   const segs = N.reduce((a, b) => a + b, 0);
-  const cap = symbol.meta.capacityBytes ?? symbol.meta.dataBytes - 4;
+  const cap = symbol.meta.capacityBytes;
   process.stderr.write(
     `wrote ${out} (${profile}, K=${K} rings, ${segs} cells, ${text.length} chars, ~${cap}B capacity)\n`
   );

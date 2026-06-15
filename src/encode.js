@@ -1,14 +1,9 @@
 // Encode pipeline (AGENTS.md §4): text -> Symbol { params, ringBits }.
 
-import { DEFAULT_PROFILE, SCHEDULES, segCounts } from "./params.js";
+import { DEFAULT_PROFILE, SCHEDULES, segCounts, monoLayout } from "./params.js";
 import { rsEncode } from "./rs.js";
 import { bytesToBits } from "./bits.js";
 import { FRAME_HEADER, writeFrame } from "./frame.js";
-
-/** Parity byte count for a codeword of `totalBytes` (AGENTS.md §2.6, 30% default). */
-function parityFor(totalBytes, p) {
-  return Math.max(2, Math.round(totalBytes * p.parity));
-}
 
 /**
  * Encode `text` into an IRIS Symbol. Picks the smallest ring schedule that
@@ -21,11 +16,8 @@ export function encodeToSymbol(text, opts = {}) {
 
   for (const K of SCHEDULES) {
     const N = segCounts(K, p);
-    const cap = N.reduce((a, b) => a + b, 0);
-    const totalBytes = Math.floor(cap / 8);
-    const parity = parityFor(totalBytes, p);
+    const { cap, totalBytes, parity, dataBytes } = monoLayout(N, p);
     if (parity >= totalBytes) continue;
-    const dataBytes = totalBytes - parity;
     if (dataBytes < FRAME_HEADER + payload.length) continue;
 
     const msg = writeFrame(payload, dataBytes);
@@ -44,7 +36,7 @@ export function encodeToSymbol(text, opts = {}) {
     return {
       params: { ...p, K, N },
       ringBits,
-      meta: { totalBytes, parity, dataBytes, capacityBits: cap },
+      meta: { totalBytes, parity, dataBytes, capacityBits: cap, capacityBytes: dataBytes - FRAME_HEADER },
     };
   }
 
