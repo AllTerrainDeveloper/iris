@@ -18,24 +18,14 @@
 
 import { segCounts, ringMidU } from "./params.js";
 import { rsCorrect } from "./rs.js";
-import { bitsToBytes, crc16 } from "./bits.js";
-import { COLOR_PROFILE, SCHEDULES_COLOR, PARITY_LEVELS, parityFor } from "./color.js";
+import { bitsToBytes } from "./bits.js";
+import { readFrame } from "./frame.js";
+import { COLOR_PROFILE, SCHEDULES_COLOR, PARITY_LEVELS, parityFor, PALETTE } from "./color.js";
 
 // Monotonic clock for the optional decode budget (browser + Node).
 const now = (typeof performance !== "undefined" && performance.now)
   ? () => performance.now()
   : () => Date.now();
-
-const PAL = [
-  [0, 0, 0],
-  [255, 0, 0],
-  [0, 255, 0],
-  [0, 0, 255],
-  [255, 255, 0],
-  [255, 0, 255],
-  [0, 255, 255],
-  [255, 255, 255],
-];
 
 // ── Pixel maps & sampling ────────────────────────────────────────────────────
 
@@ -58,7 +48,7 @@ function buildMaps(grid) {
     let best = 0;
     let bd = Infinity;
     for (let k = 0; k < 8; k++) {
-      const d = (r - PAL[k][0]) ** 2 + (g - PAL[k][1]) ** 2 + (b - PAL[k][2]) ** 2;
+      const d = (r - PALETTE[k][0]) ** 2 + (g - PALETTE[k][1]) ** 2 + (b - PALETTE[k][2]) ** 2;
       if (d < bd) { bd = d; best = k; }
     }
     raw[i] = best;
@@ -501,12 +491,8 @@ function attempt(m, p, K, N, O, M, theta0, ax, ay, damage) {
     if (dataBytes < 4) continue;
     const corrected = rsCorrect(code, parity, erasures.length <= parity ? erasures : []);
     if (!corrected) continue;
-    const len = (corrected[0] << 8) | corrected[1];
-    if (4 + len > dataBytes) continue;
-    const stored = (corrected[2] << 8) | corrected[3];
-    const payload = corrected.slice(4, 4 + len);
-    if (crc16(payload) !== stored) continue;
-    return new TextDecoder().decode(payload);
+    const text = readFrame(corrected, dataBytes);
+    if (text !== null) return text;
   }
   return null;
 }

@@ -4,7 +4,8 @@
 
 import { DEFAULT_PROFILE, SCHEDULES, segCounts, ringMidU } from "./params.js";
 import { rsCorrect } from "./rs.js";
-import { bitsToBytes, crc16 } from "./bits.js";
+import { bitsToBytes } from "./bits.js";
+import { readFrame } from "./frame.js";
 
 const INK = 128; // gray < INK counts as ink
 
@@ -62,13 +63,9 @@ export function decodeRaster(grid, opts = {}) {
     const corrected = rsCorrect(code, parity);
     if (!corrected) continue;
 
-    const len = (corrected[0] << 8) | corrected[1];
-    if (4 + len > dataBytes) continue;
-    const stored = (corrected[2] << 8) | corrected[3];
-    const payload = corrected.slice(4, 4 + len);
-    if (crc16(payload) !== stored) continue;
-
-    return { text: new TextDecoder().decode(payload), params: { K, N } };
+    const text = readFrame(corrected, dataBytes);
+    if (text === null) continue;
+    return { text, params: { K, N } };
   }
 
   throw new Error("no decodable IRIS symbol found");

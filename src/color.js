@@ -8,8 +8,9 @@
 
 import { segCounts, ringMidU, imageSizePx } from "./params.js";
 import { rsEncode, rsCorrect } from "./rs.js";
-import { bytesToBits, bitsToBytes, crc16 } from "./bits.js";
-import { sector } from "./render-svg.js";
+import { bytesToBits, bitsToBytes } from "./bits.js";
+import { FRAME_HEADER, writeFrame, readFrame } from "./frame.js";
+import { sector, svgNum } from "./render-svg.js";
 
 /** Dense color profile (3 bits/cell). */
 export const COLOR_PROFILE = Object.freeze({
@@ -39,8 +40,6 @@ export const PALETTE = Object.freeze([
 ]);
 
 const HEX = PALETTE.map(([r, g, b]) => `#${[r, g, b].map((v) => v.toString(16).padStart(2, "0")).join("")}`);
-
-const FRAME_HEADER = 4; // len(2) + crc(2)
 
 // Adaptive ECC: small payloads leave spare room in the symbol, so we spend it on
 // parity. Encode picks the HIGHEST level that still fits; the decoder tries each.
@@ -87,14 +86,7 @@ export function encodeColor(text, opts = {}) {
     if (!parity) continue; // even the lowest level doesn't fit — try a bigger K
     const dataBytes = totalBytes - parity;
 
-    const msg = new Uint8Array(dataBytes);
-    msg[0] = (payload.length >> 8) & 0xff;
-    msg[1] = payload.length & 0xff;
-    const c = crc16(payload);
-    msg[2] = (c >> 8) & 0xff;
-    msg[3] = c & 0xff;
-    msg.set(payload, FRAME_HEADER);
-
+    const msg = writeFrame(payload, dataBytes);
     const code = rsEncode(msg, parity); // totalBytes
     const bits = bytesToBits(code); // totalBytes*8 <= rawBits
 
@@ -178,8 +170,6 @@ export function renderColorRaster(sym) {
   }
   return { width: D, height: D, data };
 }
-
-const svgNum = (n) => n.toFixed(3).replace(/\.?0+$/, "");
 
 /**
  * Color Symbol -> SVG string. `opts.style` picks the cell aesthetic:
@@ -314,12 +304,9 @@ export function decodeColor(grid, opts = {}) {
       if (dataBytes < FRAME_HEADER) continue;
       const corrected = rsCorrect(code, parity);
       if (!corrected) continue;
-      const len = (corrected[0] << 8) | corrected[1];
-      if (4 + len > dataBytes) continue;
-      const stored = (corrected[2] << 8) | corrected[3];
-      const payload = corrected.slice(4, 4 + len);
-      if (crc16(payload) !== stored) continue;
-      return { text: new TextDecoder().decode(payload), params: { K, N } };
+      const text = readFrame(corrected, dataBytes);
+      if (text === null) continue;
+      return { text, params: { K, N } };
     }
   }
   throw new Error("no decodable IRIS color symbol found");

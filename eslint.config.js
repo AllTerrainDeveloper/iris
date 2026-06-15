@@ -12,7 +12,7 @@ const quality = {
 };
 
 export default [
-  { ignores: ["node_modules/**"] },
+  { ignores: ["node_modules/**", "web/vendor/**"] },
   js.configs.recommended,
   {
     languageOptions: { ecmaVersion: 2023, sourceType: "module" },
@@ -22,7 +22,7 @@ export default [
   // by the browser, so allow both global sets there.
   {
     files: ["src/**/*.js"],
-    languageOptions: { globals: { ...globals.node, ...globals.browser } },
+    languageOptions: { globals: { ...globals.node, ...globals.browser, PIXI: "readonly" } },
   },
   {
     files: ["bin/**/*.js", "test/**/*.js", "eslint.config.js"],

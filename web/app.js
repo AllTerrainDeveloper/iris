@@ -21,7 +21,8 @@ const els = {
   copySvg: $("copySvg"),
 };
 
-let current = null; // { svg, symbol }
+let current = null; // { svg, symbol, canvas }
+let renderToken = 0; // guards async blob renders against fast re-renders
 
 function safeFilename(text) {
   const base = text.trim().slice(0, 24).replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "");
@@ -50,7 +51,6 @@ function render() {
 
   if (!text) {
     showError("Type something to generate a code.");
-    els.error.textContent = "Type something to generate a code.";
     return;
   }
 
@@ -66,23 +66,25 @@ function render() {
   const style = els.style.value;
   const svg = renderColorSVG(symbol, { style });
   current = { svg, symbol, canvas: null };
-  // "blobs" is drawn by the PixiJS WebGL gradient-slice renderer (real interpolated
-  // slices, not an SVG approximation). Other styles use the deterministic SVG.
-  let blobCanvas = null;
-  if (style === "blobs" && pixiAvailable()) blobCanvas = renderBlobCanvas(symbol);
-  if (blobCanvas) {
-    blobCanvas.classList.add("h-full", "w-full");
-    blobCanvas.style.objectFit = "contain";
-    els.preview.replaceChildren(blobCanvas);
-    current.canvas = blobCanvas;
-  } else {
-    els.preview.innerHTML = svg;
-    const svgEl = els.preview.querySelector("svg");
-    if (svgEl) {
-      svgEl.removeAttribute("width");
-      svgEl.removeAttribute("height");
-      svgEl.classList.add("h-full", "w-full");
-    }
+  // Default to the deterministic SVG preview (also the fallback).
+  els.preview.innerHTML = svg;
+  const svgEl = els.preview.querySelector("svg");
+  if (svgEl) {
+    svgEl.removeAttribute("width");
+    svgEl.removeAttribute("height");
+    svgEl.classList.add("h-full", "w-full");
+  }
+  // "blobs" is drawn by the PixiJS WebGL metaball renderer (async in v8); swap the
+  // canvas in when it's ready, guarding against races from fast typing.
+  if (style === "blobs" && pixiAvailable()) {
+    const token = ++renderToken;
+    renderBlobCanvas(symbol).then((canvas) => {
+      if (!canvas || token !== renderToken || els.style.value !== "blobs") return;
+      canvas.classList.add("h-full", "w-full");
+      canvas.style.objectFit = "contain";
+      els.preview.replaceChildren(canvas);
+      current.canvas = canvas;
+    }).catch(() => {});
   }
 
   const { K, N } = symbol.params;

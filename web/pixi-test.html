@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <title>IRIS · PixiJS blob test</title>
-    <script src="https://cdn.jsdelivr.net/npm/pixi.js@7.4.2/dist/pixi.min.js"></script>
+    <script src="./vendor/pixi.min.js"></script>
     <style>
       body { margin: 0; background: #0f172a; color: #e2e8f0; font-family: monospace; }
       .wrap { display: flex; gap: 24px; padding: 24px; align-items: flex-start; }
@@ -21,18 +21,38 @@
       </div>
     </div>
     <script type="module">
-      import { encodeColor } from "../src/color.js";
+      import { encodeColor, PALETTE, nearestColor } from "../src/color.js";
       import { decodeColorRobust } from "../src/robust.js";
       import { renderBlobCanvas, pixiAvailable } from "../src/pixi-render.js";
+      // Direct cell-center match (no rotation search) → reveals the exact transform.
+      function cellMatch(sym, rgb, W, H, mx, my) {
+        const { Rp, dr, K, N, u } = sym.params, cx = W / 2, cy = H / 2, uu = (W / (2 * (Rp + K * dr + sym.params.quiet)));
+        let good = 0, tot = 0;
+        for (let k = 0; k < K; k++) {
+          const rmid = (Rp + (k + 0.5) * dr) * uu, dk = 2 * Math.PI / N[k];
+          for (let i = 1; i < N[k]; i++) {
+            const a = i * dk;
+            let px = cx + rmid * Math.sin(a), py = cy - rmid * Math.cos(a);
+            if (mx) px = W - px; if (my) py = H - py;
+            const x = Math.round(px), y = Math.round(py);
+            if (x < 0 || y < 0 || x >= W || y >= H) continue;
+            const o = (y * W + x) * 3;
+            if (nearestColor(rgb[o], rgb[o + 1], rgb[o + 2]) === sym.cells[k][i]) good++;
+            tot++;
+          }
+        }
+        return Math.round(100 * good / tot);
+      }
 
       const text = new URLSearchParams(location.search).get("t") || "hello iris";
       const result = document.getElementById("result");
       const info = document.getElementById("info");
+      (async () => {
       try {
         if (!pixiAvailable()) throw new Error("PIXI global not found");
         const sym = encodeColor(text);
         const t0 = performance.now();
-        const canvas = renderBlobCanvas(sym);
+        const canvas = await renderBlobCanvas(sym);
         const renderMs = Math.round(performance.now() - t0);
         window.__IRIS_MS = renderMs;
         document.getElementById("host").appendChild(canvas);
@@ -42,8 +62,26 @@
         const id = canvas.getContext("2d").getImageData(0, 0, W, H).data;
         const rgb = new Uint8Array(W * H * 3);
         for (let i = 0, j = 0; i < id.length; i += 4, j += 3) { rgb[j] = id[i]; rgb[j + 1] = id[i + 1]; rgb[j + 2] = id[i + 2]; }
-        let dec = null;
-        try { dec = decodeColorRobust({ width: W, height: H, data: rgb }); } catch (e) { dec = { err: e.message }; }
+        const flip = (src, hx, vy) => {
+          const o = new Uint8Array(src.length);
+          for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+            const sx = hx ? W - 1 - x : x, sy = vy ? H - 1 - y : y;
+            const di = (y * W + x) * 3, si = (sy * W + sx) * 3;
+            o[di] = src[si]; o[di + 1] = src[si + 1]; o[di + 2] = src[si + 2];
+          }
+          return o;
+        };
+        const variants = { orig: rgb, hflip: flip(rgb, 1, 0), vflip: flip(rgb, 0, 1), hvflip: flip(rgb, 1, 1) };
+        const tried = [];
+        let dec = null, which = "";
+        for (const [name, data] of Object.entries(variants)) {
+          let r = null;
+          try { r = decodeColorRobust({ width: W, height: H, data }, { budgetMs: 3000 }); } catch (e) { r = { err: e.message }; }
+          tried.push(name + ":" + (r && r.text === text ? "OK" : "no"));
+          if (r && r.text === text) { dec = r; which = name; break; }
+        }
+        window.__IRIS_VARIANTS = tried.join(" ");
+        window.__MATCH = `orig:${cellMatch(sym, rgb, W, H, 0, 0)} mx:${cellMatch(sym, rgb, W, H, 1, 0)} my:${cellMatch(sym, rgb, W, H, 0, 1)} mxy:${cellMatch(sym, rgb, W, H, 1, 1)}`;
         const okDec = dec && dec.text === text;
         result.textContent = okDec ? `✓ decodes: "${dec.text}" (K=${dec.params.K})` : `✗ decode failed: ${dec && (dec.err || dec.text)}`;
         result.dataset.status = okDec ? "ok" : "fail";
@@ -56,6 +94,7 @@
         window.__IRIS_DONE = true;
         window.__IRIS_ERR = e.message;
       }
+      })();
     </script>
   </body>
 </html>

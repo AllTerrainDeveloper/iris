@@ -2,13 +2,8 @@
 
 import { DEFAULT_PROFILE, SCHEDULES, segCounts } from "./params.js";
 import { rsEncode } from "./rs.js";
-import { bytesToBits, crc16 } from "./bits.js";
-
-// Data frame inside the RS message:
-//   [0..1] payload length (uint16 BE)
-//   [2..3] CRC-16 of payload (BE)
-//   [4..]  UTF-8 payload, then zero padding
-const FRAME_HEADER = 4;
+import { bytesToBits } from "./bits.js";
+import { FRAME_HEADER, writeFrame } from "./frame.js";
 
 /** Parity byte count for a codeword of `totalBytes` (AGENTS.md §2.6, 30% default). */
 function parityFor(totalBytes, p) {
@@ -33,14 +28,7 @@ export function encodeToSymbol(text, opts = {}) {
     const dataBytes = totalBytes - parity;
     if (dataBytes < FRAME_HEADER + payload.length) continue;
 
-    const msg = new Uint8Array(dataBytes);
-    msg[0] = (payload.length >> 8) & 0xff;
-    msg[1] = payload.length & 0xff;
-    const c = crc16(payload);
-    msg[2] = (c >> 8) & 0xff;
-    msg[3] = c & 0xff;
-    msg.set(payload, FRAME_HEADER);
-
+    const msg = writeFrame(payload, dataBytes);
     const code = rsEncode(msg, parity); // length === totalBytes
     const bits = bytesToBits(code);
 

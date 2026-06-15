@@ -66,9 +66,16 @@ function renderBase(text) {
     // Blobs are drawn by the PixiJS gradient-slice renderer; distortion + decode
     // then run on that canvas exactly like the SVG-based styles.
     if (els.style.value === "blobs" && pixiAvailable()) {
-      const c = renderBlobCanvas(symbol, { supersample: 1 }); // native res → fast distort/decode
-      if (c) { resolve({ canvas: c, D: c.width, symbol }); return; }
+      // PixiJS v8 renders asynchronously; same supersample as the generator
+      // preview so the resolution matches (and one shared renderer is reused).
+      renderBlobCanvas(symbol)
+        .then((c) => { c ? resolve({ canvas: c, D: c.width, symbol }) : svgBase(); })
+        .catch(() => svgBase());
+      return;
     }
+    svgBase();
+
+    function svgBase() {
     const svg = renderColorSVG(symbol, { style: els.style.value });
     const D = +svg.match(/width="(\d+)"/)[1];
     const img = new Image();
@@ -85,6 +92,7 @@ function renderBase(text) {
     };
     img.onerror = reject;
     img.src = url;
+    }
   });
 }
 
@@ -249,14 +257,23 @@ async function run() {
   ctx.clearRect(0, 0, D, D);
   ctx.drawImage(distorted, 0, 0);
 
-  // Decode.
-  const id = distorted.getContext("2d").getImageData(0, 0, D, D);
+  // Decode. The display is full-resolution (crisp), but decode runs on a
+  // downscaled copy (~480px) so high-supersample blobs stay fast — the decoder's
+  // 3×3 sampling doesn't need the extra pixels, and this keeps decode interactive.
+  const DEC = Math.min(D, 480);
+  let decCanvas = distorted;
+  if (DEC < D) {
+    decCanvas = document.createElement("canvas");
+    decCanvas.width = decCanvas.height = DEC;
+    decCanvas.getContext("2d").drawImage(distorted, 0, 0, DEC, DEC);
+  }
+  const id = decCanvas.getContext("2d").getImageData(0, 0, DEC, DEC);
   const t0 = performance.now();
   let res = null;
   try {
     // Cap the decode: the geometry search is exhaustive, so a hard/undecodable
     // frame could otherwise block the page for seconds. Past the budget it bails.
-    res = decodeColorRobust(imageDataToGrid(id), { budgetMs: 800 });
+    res = decodeColorRobust(imageDataToGrid(id), { budgetMs: 1200 });
   } catch {
     res = null;
   }

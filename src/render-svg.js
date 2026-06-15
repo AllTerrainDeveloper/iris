@@ -2,10 +2,9 @@
 
 import { imageSizePx } from "./params.js";
 
-const f = (n) => {
-  const s = n.toFixed(3);
-  return s.replace(/\.?0+$/, "");
-};
+/** Format a pixel coordinate for SVG: 3 decimals, trailing zeros trimmed. */
+export const svgNum = (n) => n.toFixed(3).replace(/\.?0+$/, "");
+const f = svgNum; // terse alias for the dense path-building strings below
 
 // Annular sector path. Radii in px; angles in rad (0 at top, clockwise).
 export function sector(c, r0, r1, a0, a1) {
