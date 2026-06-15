@@ -2,6 +2,7 @@
 // Browser-safe modules only (no Node APIs). Uses the v2 color profile by
 // default for high capacity (3 bits/cell).
 import { encodeColor, renderColorSVG } from "../src/color.js";
+import { renderWheelGrid } from "../src/wheel-render.js";
 import { renderBlobCanvas, pixiAvailable } from "../src/pixi-render.js";
 
 const $ = (id) => document.getElementById(id);
@@ -23,6 +24,23 @@ const els = {
 
 let current = null; // { svg, symbol, canvas }
 let renderToken = 0; // guards async blob renders against fast re-renders
+
+// Paint an RGB grid ({width,height,data}) onto a fresh canvas via ImageData.
+function gridToCanvas(grid) {
+  const canvas = document.createElement("canvas");
+  canvas.width = grid.width;
+  canvas.height = grid.height;
+  const img = canvas.getContext("2d").createImageData(grid.width, grid.height);
+  const d = img.data;
+  for (let i = 0, j = 0; i < grid.data.length; i += 3, j += 4) {
+    d[j] = grid.data[i];
+    d[j + 1] = grid.data[i + 1];
+    d[j + 2] = grid.data[i + 2];
+    d[j + 3] = 255;
+  }
+  canvas.getContext("2d").putImageData(img, 0, 0);
+  return canvas;
+}
 
 function safeFilename(text) {
   const base = text.trim().slice(0, 24).replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "");
@@ -64,27 +82,37 @@ function render() {
 
   els.error.classList.add("hidden");
   const style = els.style.value;
-  const svg = renderColorSVG(symbol, { style });
+  // SVG is the vector source of truth; the "wheel" is a per-pixel raster, so its
+  // vector/SVG export falls back to the crisp slices arcs.
+  const svg = renderColorSVG(symbol, { style: style === "wheel" ? "slices" : style });
   current = { svg, symbol, canvas: null };
-  // Default to the deterministic SVG preview (also the fallback).
-  els.preview.innerHTML = svg;
-  const svgEl = els.preview.querySelector("svg");
-  if (svgEl) {
-    svgEl.removeAttribute("width");
-    svgEl.removeAttribute("height");
-    svgEl.classList.add("h-full", "w-full");
-  }
-  // "blobs" is drawn by the PixiJS WebGL metaball renderer (async in v8); swap the
-  // canvas in when it's ready, guarding against races from fast typing.
-  if (style === "blobs" && pixiAvailable()) {
-    const token = ++renderToken;
-    renderBlobCanvas(symbol).then((canvas) => {
-      if (!canvas || token !== renderToken || els.style.value !== "blobs") return;
-      canvas.classList.add("h-full", "w-full");
-      canvas.style.objectFit = "contain";
-      els.preview.replaceChildren(canvas);
-      current.canvas = canvas;
-    }).catch(() => {});
+
+  if (style === "wheel") {
+    const canvas = gridToCanvas(renderWheelGrid(symbol, { blend: 0.6 }));
+    canvas.classList.add("h-full", "w-full");
+    canvas.style.objectFit = "contain";
+    els.preview.replaceChildren(canvas);
+    current.canvas = canvas;
+  } else {
+    els.preview.innerHTML = svg;
+    const svgEl = els.preview.querySelector("svg");
+    if (svgEl) {
+      svgEl.removeAttribute("width");
+      svgEl.removeAttribute("height");
+      svgEl.classList.add("h-full", "w-full");
+    }
+    // "blobs" is the PixiJS WebGL metaball renderer (async in v8); swap the canvas
+    // in when it's ready, guarding against races from fast typing.
+    if (style === "blobs" && pixiAvailable()) {
+      const token = ++renderToken;
+      renderBlobCanvas(symbol).then((canvas) => {
+        if (!canvas || token !== renderToken || els.style.value !== "blobs") return;
+        canvas.classList.add("h-full", "w-full");
+        canvas.style.objectFit = "contain";
+        els.preview.replaceChildren(canvas);
+        current.canvas = canvas;
+      }).catch(() => {});
+    }
   }
 
   const { K, N } = symbol.params;

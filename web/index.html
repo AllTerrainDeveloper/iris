@@ -91,9 +91,10 @@
               id="ctlStyle"
               class="mt-2 w-full rounded-xl border border-slate-700 bg-slate-950/70 px-4 py-2.5 text-sm text-slate-100 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/40"
             >
-              <option value="slices">Slices — annular sectors (most robust)</option>
+              <option value="wheel">Wheel — blended colour arcs (smooth)</option>
+              <option value="slices">Slices — solid arcs (most robust)</option>
               <option value="dots">Dots — circles</option>
-              <option value="blobs">Blobs — blended circles</option>
+              <option value="blobs">Blobs — gooey metaballs</option>
             </select>
 
             <!-- Stats -->
@@ -256,8 +257,8 @@
       </div>
     </div>
 
-    <!-- PixiJS (WebGL) — powers the "blobs" gradient-slice renderer. Classic script
-         so the PIXI global is ready before the deferred module scripts run. -->
+    <!-- PixiJS (WebGL) — powers the "blobs" metaball renderer. Classic script so
+         the PIXI global is ready before the deferred module scripts run. -->
     <script src="./vendor/pixi.min.js"></script>
     <script type="module" src="./app.js"></script>
     <script type="module" src="./lab.js"></script>

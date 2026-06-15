@@ -2,7 +2,25 @@
 // blur, noise, scratches) and see whether the robust decoder reconstructs it.
 import { encodeColor, renderColorSVG } from "../src/color.js";
 import { decodeColorRobust } from "../src/robust.js";
+import { renderWheelGrid } from "../src/wheel-render.js";
 import { renderBlobCanvas, pixiAvailable } from "../src/pixi-render.js";
+
+// Paint an RGB grid ({width,height,data}) onto a fresh canvas via ImageData.
+function gridToCanvas(grid) {
+  const canvas = document.createElement("canvas");
+  canvas.width = grid.width;
+  canvas.height = grid.height;
+  const img = canvas.getContext("2d").createImageData(grid.width, grid.height);
+  const d = img.data;
+  for (let i = 0, j = 0; i < grid.data.length; i += 3, j += 4) {
+    d[j] = grid.data[i];
+    d[j + 1] = grid.data[i + 1];
+    d[j + 2] = grid.data[i + 2];
+    d[j + 3] = 255;
+  }
+  canvas.getContext("2d").putImageData(img, 0, 0);
+  return canvas;
+}
 
 const $ = (id) => document.getElementById(id);
 const els = {
@@ -63,11 +81,16 @@ function renderBase(text) {
       reject(e);
       return;
     }
-    // Blobs are drawn by the PixiJS gradient-slice renderer; distortion + decode
-    // then run on that canvas exactly like the SVG-based styles.
+    // The "wheel" is a per-pixel raster; distortion + decode then run on that
+    // canvas exactly like the SVG-based styles.
+    if (els.style.value === "wheel") {
+      const canvas = gridToCanvas(renderWheelGrid(symbol, { blend: 0.6 }));
+      resolve({ canvas, D: canvas.width, symbol });
+      return;
+    }
+    // "blobs" is the PixiJS metaball renderer (async in v8); distort + decode run
+    // on its canvas exactly like the SVG-based styles.
     if (els.style.value === "blobs" && pixiAvailable()) {
-      // PixiJS v8 renders asynchronously; same supersample as the generator
-      // preview so the resolution matches (and one shared renderer is reused).
       renderBlobCanvas(symbol)
         .then((c) => { c ? resolve({ canvas: c, D: c.width, symbol }) : svgBase(); })
         .catch(() => svgBase());

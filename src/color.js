@@ -41,6 +41,18 @@ export const PALETTE = Object.freeze([
 
 const HEX = PALETTE.map(([r, g, b]) => `#${[r, g, b].map((v) => v.toString(16).padStart(2, "0")).join("")}`);
 
+// White (palette index 7) is the background colour, so on their own white cells
+// leave gaps and make each ring look like scattered "jewels" rather than a solid
+// disc. For the seamless-disc look we paint them a faint tint instead — light
+// enough that nearestColor()/locate() still classify it as white (every channel
+// > 235, nearest palette entry is white), so the change is invisible to every
+// decoder while the rings read as continuous bands.
+export const WHITE_TINT_RGB = Object.freeze([237, 239, 245]);
+const WHITE_TINT_HEX = `#${WHITE_TINT_RGB.map((v) => v.toString(16).padStart(2, "0")).join("")}`;
+// Crisp black ring framing the disc, drawn at the data edge (cell centres sit at
+// ring mids, well inside, so sampling is unaffected). Shared by every renderer.
+export const FRAME_WIDTH_U = 0.5;
+
 // Adaptive ECC: small payloads leave spare room in the symbol, so we spend it on
 // parity. Encode picks the HIGHEST level that still fits; the decoder tries each.
 // (Large payloads fall back to 0.3, preserving max capacity.)
@@ -134,7 +146,11 @@ function colorAt(ru, theta, sym) {
   if (ru >= Rp - 2 && ru <= Rp) return PALETTE[0];
   if (ru < Rp) return null;
   const outer = Rp + K * dr;
-  if (ru > outer) return null;
+  if (ru > outer) {
+    // Crisp black frame just outside the data, in the quiet zone (cosmetic; cell
+    // centres are at ring mids, well inside, so sampling/decoding is unaffected).
+    return ru <= outer + FRAME_WIDTH_U ? PALETTE[0] : null;
+  }
   const k = Math.floor((ru - Rp) / dr);
   if (k >= K) return null;
   const dk = (2 * Math.PI) / N[k];
@@ -142,7 +158,8 @@ function colorAt(ru, theta, sym) {
   // on the vertical axis and renders symmetric). Nearest-cell = round, with wrap.
   let i = Math.round(theta / dk) % N[k];
   if (i < 0) i += N[k];
-  return PALETTE[sym.cells[k][i]];
+  const v = sym.cells[k][i];
+  return v === 7 ? WHITE_TINT_RGB : PALETTE[v]; // white cells faintly tinted (seamless bands)
 }
 
 /** Color Symbol -> RGB grid { width, height, data: Uint8Array (RGB triplets) }. */
@@ -195,7 +212,7 @@ export function renderColorSVG(sym, opts = {}) {
   if (style === "blobs") {
     out.push("<defs>");
     for (let v = 0; v < HEX.length; v++) {
-      if (v === 7) continue;
+      if (v === 7) continue; // white === background, no blob
       out.push(
         `<radialGradient id="iris-blob-${v}">` +
           `<stop offset="55%" stop-color="${HEX[v]}"/>` +
@@ -206,6 +223,7 @@ export function renderColorSVG(sym, opts = {}) {
     out.push("</defs>");
   }
   const byColor = HEX.map(() => []); // solid shapes, grouped by colour
+  const tint = []; // faint-tint sectors for white cells (slices) → gap-free bands
   const blobs = []; // gradient-filled circles (their own fill)
   for (let k = 0; k < K; k++) {
     const r0 = (Rp + k * dr) * u;
@@ -214,13 +232,17 @@ export function renderColorSVG(sym, opts = {}) {
     const rmid = (Rp + k * dr + dr / 2) * u;
     for (let i = 0; i < N[k]; i++) {
       const v = sym.cells[k][i];
-      if (v === 7) continue; // white === background, skip
-      // Slices style, and the registration ray (i===0) in every style, stay solid sectors.
-      // Cell i is centered on angle i·dk, so cell 0's wedge straddles vertical symmetrically.
-      if (style === "slices" || i === 0) {
-        byColor[v].push(sector(c, r0, r1, (i - 0.5) * dk, (i + 0.5) * dk));
+      // Slices style, and the registration ray (i===0) in every style, stay solid
+      // sectors; in slices, white cells are tinted (not skipped) so each ring is a
+      // seamless band. In dots/blobs a white cell is left as open background.
+      const solid = style === "slices" || i === 0;
+      if (solid) {
+        // Cell i is centered on angle i·dk, so cell 0's wedge straddles vertical symmetrically.
+        const sec = sector(c, r0, r1, (i - 0.5) * dk, (i + 0.5) * dk);
+        (v === 7 ? tint : byColor[v]).push(sec);
         continue;
       }
+      if (v === 7) continue; // dots/blobs: white === background
       const a = i * dk;
       const cx = svgNum(c + rmid * Math.sin(a));
       const cy = svgNum(c - rmid * Math.cos(a));
@@ -234,10 +256,16 @@ export function renderColorSVG(sym, opts = {}) {
       }
     }
   }
+  if (tint.length) out.push(`<g fill="${WHITE_TINT_HEX}">${tint.join("")}</g>`);
   if (blobs.length) out.push(`<g>${blobs.join("")}</g>`);
   for (let v = 0; v < HEX.length; v++) {
     if (byColor[v].length) out.push(`<g fill="${HEX[v]}">${byColor[v].join("")}</g>`);
   }
+  // Crisp outer frame ring on every style so the disc has a clean circular edge.
+  const rFrame = (Rp + K * dr) * u;
+  out.push(
+    `<circle cx="${c}" cy="${c}" r="${svgNum(rFrame)}" fill="none" stroke="#000" stroke-width="${svgNum(FRAME_WIDTH_U * u)}"/>`,
+  );
   // Pupil bullseye (black, on top for crisp localization). The registration ray
   // (segment 0 of every ring) is already drawn above as solid black cells.
   out.push(`<g fill="#000">`);

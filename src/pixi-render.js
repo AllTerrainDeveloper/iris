@@ -14,15 +14,18 @@
 // PIXI v8 is supplied by the caller: pass `opts.PIXI` (`import * as PIXI from
 // "pixi.js"`) or rely on a global `PIXI` (CDN). IRIS stays zero-dependency. The
 // v8 renderer initialises asynchronously, so `renderBlobCanvas` returns a Promise.
-import { PALETTE } from "./color.js";
+import { PALETTE, WHITE_TINT_RGB, FRAME_WIDTH_U } from "./color.js";
 import { imageSizePx } from "./params.js";
 
 const globalPixi = () => (typeof PIXI !== "undefined" ? PIXI : null);
 const resolvePixi = (opts) => (opts && opts.PIXI) || globalPixi();
 
-const RAD_TAN = 1.0; // tangential reach vs angular cell pitch (≤1 keeps cell centres pure)
+// Tangential reach vs angular cell pitch. 1.5 overlaps neighbours enough to soften
+// the bead necks into smoother rings while cell CORES stay pure enough to decode —
+// a field-decode sweep is clean+robust safe through ~1.8 (2.0 breaks clean decode).
+const RAD_TAN = 1.5;
 const RAD_RAD = 0.49; // radial reach vs ring width — MUST stay < 0.5 (no cross-level blend)
-const THRESHOLD = 0.2; // iso-surface level on the accumulated field
+const THRESHOLD = 0.12; // iso-surface level; lower fills the necks (rings can't merge: RAD_RAD<0.5)
 const GRAD_SCALE = 26.0; // field-gradient → surface-normal strength (visual only)
 // Accumulate into a plain RGBA8 target (works everywhere — no half-float render
 // dependency). Contributions are pre-scaled by ACCUM so the additive sum (≤~1.2
@@ -144,10 +147,12 @@ function buildBlobs(sym, size) {
     const radRad = RAD_RAD * dr * u;
     for (let i = 1; i < N[k]; i++) {
       const v = sym.cells[k][i];
-      if (v === 7) continue; // white === background
+      // Every cell emits a blob (white → faint tint) so the ring connects through
+      // white cells instead of breaking; the tint still decodes as white at the core.
+      const rgb = v === 7 ? WHITE_TINT_RGB : PALETTE[v];
       const a = i * dk;
       const rx = Math.sin(a), ry = -Math.cos(a); // unit radial direction
-      blobs.push({ x: c + rmid * rx, y: c + rmid * ry, rx, ry, radTan, radRad, rgb: PALETTE[v] });
+      blobs.push({ x: c + rmid * rx, y: c + rmid * ry, rx, ry, radTan, radRad, rgb });
     }
   }
   return blobs;
@@ -201,6 +206,8 @@ function buildFiducials(PX, sym, size) {
     for (let s = 0; s <= S; s++) pts.push(...P(c, c, r0, a1 - (a1 - a0) * (s / S)));
     g.poly(pts).fill(0x000000);
   }
+  // Crisp outer frame ring at the data edge (matches every other style).
+  g.circle(c, c, (Rp + K * dr) * u).stroke({ width: FRAME_WIDTH_U * u, color: 0x000000 });
   // Pupil bullseye.
   g.circle(c, c, Rp * u).fill(0x000000);
   g.circle(c, c, (Rp - 2) * u).fill(0xffffff);

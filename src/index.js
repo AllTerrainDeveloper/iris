@@ -21,6 +21,8 @@ export {
 // The real-world decoder: recovers center/scale/rotation/perspective + scratches
 // + noise from a distorted RGB grid. Pass { budgetMs } to cap the search time.
 export { decodeColorRobust } from "./robust.js";
+// Decorative "colour wheel" raster: crisp concentric arcs with blended seams.
+export { renderWheelGrid } from "./wheel-render.js";
 
 import { encodeToSymbol } from "./encode.js";
 import { renderSVG } from "./render-svg.js";
