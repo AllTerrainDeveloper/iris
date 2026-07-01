@@ -198,7 +198,7 @@ detector (e.g. the ONNX localizer) straight into the decoder. Granular subpaths
 
 | Pillar          | IRIS's answer                                                        |
 | --------------- | ------------------------------------------------------------------- |
-| Localization    | central **pupil** (bullseye); optional ONNX localizer for cluttered scenes |
+| Localization    | central **pupil** (bullseye), found in clutter by its QR-finder-style **1:1:2:1:1 scanline signature**; optional ONNX localizer |
 | Registration    | full-radius **registration ray** + **ellipse fit** + projective disk offset; optional **RGB markers** → direct homography |
 | Sampling        | concentric **rings** of angular **segments**, each **self-marked**   |
 | Error correction| **Reed–Solomon** over GF(256) in **interleaved blocks** (≤255 B each), adaptive 30–70% parity |
@@ -299,6 +299,13 @@ Focused on the **clean-render round trip** (AGENTS.md Track-1):
   and **perspective**, and rebuilds **scratched** regions. Tested across all rotations
   0–355° (incl. −84°) with anti-aliasing, rotation+scale+translation, noise, perspective
   up to a steep tilt, perspective+rotation, and multiple thick scratches.
+  - **Localization in clutter** — a camera frame is never a code on a white field, so
+    besides the whole-image estimate the decoder searches for the pupil the way QR
+    readers find their finder patterns: a scanline crossing the bullseye reads
+    dark/white/dark/white/dark in ratio **1:1:2:1:1**; hits are verified vertically,
+    vote in clusters, and the disc radius comes from a 16-ray walk to the mandatory
+    quiet zone. An off-center code on a desk, on a dark background, or rotated inside
+    a busy scene decodes in ~150–450 ms.
   - **Rotation** — log-polar / Fourier–Mellin principle (Reddy & Chatterji): a rotation is
     a shift along the angle axis. A full-radius **registration ray** (segment 0 of every
     ring) is the fiducial; chance black-cell alignments can mimic it, so the decoder tries
