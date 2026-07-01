@@ -18,6 +18,9 @@ This is an **open-source (MIT)**, **zero-dependency**, plain-JavaScript referenc
 implementation. No framework, no build step — just the utility to **write** and **read**
 IRIS codes.
 
+> 📷 **Try it live:** [quick-hacks.me/#/tools/iris](https://quick-hacks.me/#/tools/iris) —
+> generate codes in four styles and scan them with your phone camera, all in the browser.
+
 Two profiles:
 
 - **v2 color (default)** — dense cells, **8-color palette = 3 bits/cell** (JAB-Code-style),
@@ -47,20 +50,39 @@ a fifth of a second:
 
 ### Cell styles
 
-Same data, three looks — pick from a dropdown in the generator. Only the *data cells*
+Same data, four looks — pick from a dropdown in the generator. Only the *data cells*
 change; the pupil and the orientation ray stay solid (they're the decoder's fiducials),
-so all three decode equally well:
+so every style decodes equally well:
 
 | Slices | Dots | Blobs |
 | :---: | :---: | :---: |
 | ![Slices style](docs/img/style-slices.png) | ![Dots style](docs/img/style-dots.png) | ![Blobs style](docs/img/style-blobs.png) |
 | annular sectors — max ink, most robust | crisp circles | glossy **metaballs** (PixiJS / WebGL) |
 
-**Blobs** are rendered by a small **PixiJS** WebGL shader ([`web/pixi-render.js`](./web/pixi-render.js)):
+The fourth style, **Wheel** (`src/wheel-render.js`), blends each cell's colour into its
+angular neighbours at the seams so the disc reads as a smooth, detailed colour wheel —
+cell centres stay pure (a plateau in the blend), so it still decodes, clean and robust.
+
+**Blobs** are rendered by a small **PixiJS** WebGL shader ([`src/pixi-render.js`](./src/pixi-render.js)):
 each cell is an anisotropic metaball that merges *along* its ring into gooey liquid bands
 (colours blending at the necks) but is radially confined so **levels never blend**. Lighting
 comes from the analytic field gradient — seamless across joints — and the cell cores stay
 pure, so even the metaballs decode. SVG handles slices/dots; PixiJS handles blobs.
+
+### RGB markers — faster, safer camera scans
+
+Opt-in fiducial upgrade for real-camera pipelines: `encode(text, { markers: true })` adds
+three coloured dots (R, G, B) in the **outer quiet zone**, arranged in a Y around the disc.
+Because the quiet zone carries no data they cost **zero capacity** and touch no cell — a
+marker code has the *exact same payload* as a plain one, and every decoder still reads it.
+What they buy:
+
+- **Point correspondences** — pupil + 3 non-collinear dots → a direct perspective
+  **homography** (`decodeColorMarkers`, `src/markers.js`), skipping the geometry search.
+- **Colour references** — known pure R/G/B (+ black pupil, white zone) for calibration.
+
+All four styles paint them, so a "Scan markers" toggle in a generator UI is a pure win
+for anything that will be read by a phone camera.
 
 ## Install / run
 
@@ -75,6 +97,9 @@ node bin/iris.js decode hello.ppm        # -> hello iris
 # Mono (black & white, self-clocking)
 node bin/iris.js encode "hello iris" -o hello.pgm --mono
 node bin/iris.js decode hello.pgm        # -> hello iris
+
+# `decode` isn't limited to clean renders: if the fast path fails it falls back
+# to the robust decoder, so rotated / tilted / badly-lit captures work too.
 ```
 
 ### Capacity
@@ -104,6 +129,16 @@ perspective, blur, noise, scratches — or hit **🎲 Randomize**) and watch the
 decoder recover the center, scale and rotation, then rebuild the payload via Reed–Solomon.
 A live ✓/✗ badge shows whether reconstruction succeeded and how long it took.
 
+A second page, `web/detect.html`, is the **scene-detection harness** for the two-stage
+photo pipeline: a tiny CNN (`web/models/iris-detector.onnx`, ~32 KB, via onnxruntime-web)
+**finds the code anywhere in a cluttered frame** — it predicts the pupil-centre keypoint
+plus a disc segmentation mask, the ellipse is fitted from the mask, a polar scan
+(`web/ray-refine.js`) recovers the rotation, and the crop is handed to the proven
+geometric decoder. Everything the model learns from is synthetic with **exact computed
+labels**: the [`tools/`](./tools) pipeline (`gen-dataset.js`, `distort.js`, `scene.js` +
+the PyTorch trainer `train_detector.py`) reuses the real encoder and a known warp, so no
+hand annotation is ever needed — see [`tools/README.md`](./tools/README.md).
+
 ```sh
 # serve the repository ROOT (so /web can reach /src), then open /web/
 python3 -m http.server 8765
@@ -124,15 +159,18 @@ each importable on their own.** Subpath exports (`package.json#exports`):
 import {
   encode, decode,            // high-level (color by default; { mono: true } for v1)
   encodeColor, decodeColor,  // v2 color profile
-  decodeColorRobust,         // real-world decoder: rotation/perspective/scratch/noise
+  decodeColorRobust,         // real-world decoder: rotation/perspective/lighting/scratch/noise
+  decodeColorMarkers,        // fast homography decode via the RGB quiet-zone markers
   renderColorSVG,            // Symbol -> SVG string (slices | dots | blobs)
   renderColorRaster,         // Symbol -> RGB grid
-  PALETTE,
+  renderWheelGrid,           // Symbol -> blended "colour wheel" RGB grid
+  PALETTE, MARKERS,
 } from "iris-code";
 
-const { svg, grid, symbol } = encode("hello iris");
+const { svg, grid, symbol } = encode("hello iris", { markers: true }); // markers: camera-friendly
 console.log(decode(grid).text);                          // "hello iris"
 console.log(decodeColorRobust(photoGrid, { budgetMs: 800 }).text); // distorted capture
+console.log(decodeColorMarkers(photoGrid)?.text);        // marker fast path (null on miss)
 ```
 
 ```js
@@ -151,15 +189,17 @@ browser, so you can fall back to `renderColorSVG(sym, { style: "blobs" })`.
 The reference web app (`web/app.js`, `web/lab.js`) is itself just these imports plus DOM
 wiring — copy it as a starting point. Also exported: mono (`encodeToSymbol`, `renderSVG`,
 `renderRaster`, `decodeRaster`), raster I/O (`gridToPGM`/`pgmToGrid`, `gridToPPM`/`ppmToGrid`),
-and geometry helpers (`segCounts`, `capacityBits`, `imageSizePx`). Granular subpaths
-`iris-code/color` and `iris-code/robust` are available too.
+geometry helpers (`segCounts`, `capacityBits`, `imageSizePx`, `markerFrontal`) and the
+homography toolkit (`fitHomography`, `decodeViaHomography`) for wiring an external
+detector (e.g. the ONNX localizer) straight into the decoder. Granular subpaths
+`iris-code/color`, `iris-code/robust` and `iris-code/wheel` are available too.
 
 ## How it works (short version)
 
 | Pillar          | IRIS's answer                                                        |
 | --------------- | ------------------------------------------------------------------- |
-| Localization    | central **pupil** (bullseye)                                         |
-| Registration    | **north** spur fixes rotation (ellipse-fit perspective is Track-2)   |
+| Localization    | central **pupil** (bullseye); optional ONNX localizer for cluttered scenes |
+| Registration    | full-radius **registration ray** + **ellipse fit** + projective disk offset; optional **RGB markers** → direct homography |
 | Sampling        | concentric **rings** of angular **segments**, each **self-marked**   |
 | Error correction| **Reed–Solomon** over GF(256) in **interleaved blocks** (≤255 B each), adaptive 30–70% parity |
 
@@ -187,9 +227,12 @@ src/
   pixi-render.js render engine: PixiJS/WebGL metaball "blobs" (iris-code/pixi)
   raster.js      Symbol -> grid; PGM (mono) + PPM (color) I/O
   index.js       public API
-bin/iris.js      CLI
-web/             zero-build Tailwind generator + Robustness Lab (imports src/)
-test/            node:test round-trip, color, capacity, robustness
+bin/iris.js      CLI (encode/decode; decode falls back to the robust decoder)
+web/             zero-build generator + Robustness Lab + scene-detection harness
+                 (detect.html + models/iris-detector.onnx + ray-refine.js)
+tools/           synthetic-data pipeline for the ONNX localizer: gen-dataset.js,
+                 distort.js (exact-label warps), scene.js, train_detector.py
+test/            node:test round-trip, color, RS blocks, markers, lighting, robustness
 ```
 
 ## Tests & linting
@@ -200,10 +243,13 @@ npm run lint       # ESLint (dev-only tool; npm install first)
 npm run lint:fix
 ```
 
-Tests cover RS error correction (incl. erasures), round-trip property tests, PGM/PPM
-serialization, unicode, capacity (beats QR v40), and the full robustness suite (rotation,
-scale, perspective, noise, scratches). The library keeps **zero runtime dependencies**;
-ESLint and friends are `devDependencies` only.
+The ~60 tests cover RS error correction (incl. erasures), the interleaved block layout
+(burst spreading, erasure routing, large-symbol damage recovery), round-trip property
+tests, PGM/PPM serialization, unicode, capacity (beats QR v40), marker geometry + the
+marker decode path, lighting (dim, colour casts, shadow gradients, low-contrast mono),
+and the full robustness suite (rotation, scale, perspective, noise, scratches — combined).
+The library keeps **zero runtime dependencies**; ESLint and friends are
+`devDependencies` only.
 
 ## Capacity & research
 
@@ -281,9 +327,12 @@ Focused on the **clean-render round trip** (AGENTS.md Track-1):
     large symbols (K ≥ 16) split into independent blocks with their bytes interleaved
     (as QR does): a localized burst of damage spreads evenly across blocks instead of
     overwhelming one (`src/blocks.js`, shared by every decoder).
-  - **Lighting** — a per-channel levels stretch (black/white points from the image's own
-    percentiles) undoes dim lighting and color casts before any pixel is classified, so a
-    warm ~half-brightness capture decodes like a clean render.
+  - **Lighting** — two-stage photometric calibration before any pixel is classified:
+    a tile-based **illumination field** flattens spatially varying light (a shadow
+    falling across the print), then a per-channel levels stretch (black/white points
+    from the image's own percentiles) undoes dim lighting and colour casts — so a warm
+    ~half-brightness capture, or one half-covered by a shadow, decodes like a clean
+    render. The mono decoder binarizes with **Otsu's threshold** for the same reason.
   - **Noise** — the palette-index map is **mode-filtered** (3×3 majority), so salt-and-pepper
     noise — never the local majority — is overwritten by the surrounding cell colour. Heavy
     noise survives even combined with blur and perspective.
@@ -291,16 +340,25 @@ Focused on the **clean-render round trip** (AGENTS.md Track-1):
     **seeded from the projected pupil centre** (not blind grid search) and a clean-cell
     fail-fast skips Reed–Solomon on wrong geometries. Typical cases — including
     perspective + rotation + blur + noise — decode in **~10–200 ms**.
+- ✅ **RGB quiet-zone markers** (`src/markers.js`): opt-in, zero-capacity fiducials giving
+  a direct perspective homography (`decodeColorMarkers`) + colour references — the fast
+  path for camera scanners. Painted by every renderer; validated on clean/mild captures,
+  heavy-warp robustness is a work in progress.
 - ✅ zero-build Tailwind web generator **+ Robustness Lab**.
+- 🧪 **scene detection** (experimental): a ~32 KB ONNX localizer + synthetic-data
+  training pipeline (`tools/`, `web/detect.html`) to find codes in cluttered frames and
+  seed the geometric decoder — the missing "stage 1" for arbitrary-background photos.
 
 ## Roadmap
 
 IRIS is beta and moving fast. On the near-term list:
 
 - 🚧 **More language implementations / ports** beyond this JavaScript reference.
-- 🚧 **Real-photo capture** — lens-distortion handling and *spatially varying* illumination
-  for camera pipelines (geometric rectification — rotation, scale, perspective, scratches,
-  noise — and global photometric calibration — dim light, color casts — already work).
+- 🚧 **Real-photo capture** — lens distortion and specular highlights (geometric
+  rectification, dim light, colour casts and shadow gradients are already handled);
+  promote the experimental ONNX scene localizer into the default photo pipeline.
+- 🚧 **Marker decode under heavy warp** — the homography path is validated on clean and
+  mildly distorted captures; steep tilt still falls back to the full robust search.
 - 🚧 **PNG I/O** (PGM/PPM supported today) and the full **pupil codebook** classifier.
 - 🚧 Continued **decoder robustness & speed** improvements.
 
