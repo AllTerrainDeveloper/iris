@@ -723,7 +723,136 @@ const getN = (K, p) => {
   return Ncache.get(K);
 };
 
-export const _internal = { buildMaps, locate, fitEllipse, rayCandidates, snapScore, attempt };
+// ── Clutter-tolerant localization: find the pupil bullseye ──────────────────
+// locate() assumes the symbol is the only non-white content (a scan on a white
+// field). A camera frame is cluttered, so we ALSO search for the pupil the way
+// QR readers find their finder patterns: a scanline crossing the bullseye sees
+// dark/white/dark/white/dark runs in ratio 1:1:2:1:1 (ring 2u, gap 2u, dot 4u,
+// gap 2u, ring 2u — AGENTS.md §2.2). The flanking dark runs may merge with
+// black ring-0 data cells, so they only get a lower bound; the centre dot and
+// the two white gaps are the strict part. Each horizontal hit is verified
+// vertically, and hits vote in clusters so noise can't fake a pupil.
+
+// Verify the 1:1:2:1:1 signature vertically through (x, y); returns the centre
+// row of the dot's vertical dark run, or -1.
+function verifyBullseyeColumn(m, x, y, u) {
+  const { W, H, idx } = m;
+  if (x < 0 || x >= W) return -1;
+  const dark = (yy) => idx[yy * W + x] === 0;
+  if (!dark(y)) return -1;
+  let top = y;
+  while (top > 0 && dark(top - 1)) top--;
+  let bot = y;
+  while (bot < H - 1 && dark(bot + 1)) bot++;
+  const dot = bot - top + 1;
+  if (dot < 2.2 * u || dot > 6 * u) return -1; // centre dot spans ~4u
+  const gapRun = (from, dir) => {
+    let n = 0;
+    let yy = from;
+    while (yy >= 0 && yy < H && !dark(yy) && n < 6 * u) { n++; yy += dir; }
+    return { n, next: yy };
+  };
+  const up = gapRun(top - 1, -1);
+  const dn = gapRun(bot + 1, 1);
+  const gapOk = (g) => g.n > 0.8 * u && g.n < 3.5 * u;
+  if (!gapOk(up) || !gapOk(dn)) return -1; // white gaps ~2u
+  const ringOk = (g, dir) => {
+    let n = 0;
+    let yy = g.next;
+    while (yy >= 0 && yy < H && dark(yy) && n < 8 * u) { n++; yy += dir; }
+    return n >= 0.8 * u; // pupil ring ≥ ~2u (may merge with black data cells)
+  };
+  if (!ringOk(up, -1) || !ringOk(dn, 1)) return -1;
+  return (top + bot) / 2;
+}
+
+// Scan for bullseye candidates; returns up to 3 {x, y, u} clusters, best first.
+function findBullseyes(m) {
+  const { W, H, idx } = m;
+  const clusters = []; // { x, y, u, votes }
+  for (let y = 1; y < H - 1; y += 2) {
+    const row = y * W;
+    // Run-length walk the row, keeping the last 5 runs [d, w, D, w, d].
+    const runs = []; // { start, len, dark }
+    let x = 0;
+    while (x < W) {
+      const d = idx[row + x] === 0;
+      const x0 = x;
+      while (x < W && (idx[row + x] === 0) === d) x++;
+      runs.push({ start: x0, len: x - x0, dark: d });
+      if (runs.length < 5 || !d) continue;
+      const [f1, g1, dot, g2, f2] = runs.slice(-5);
+      if (!f1.dark || g1.dark || !dot.dark || g2.dark || !f2.dark) continue;
+      const u = dot.len / 4; // centre dot is 4u wide
+      if (u < 1.2 || u > 40) continue;
+      const gapOk = (g) => g.len > 0.8 * u && g.len < 3.5 * u;
+      if (!gapOk(g1) || !gapOk(g2)) continue;
+      if (f1.len < 0.8 * u || f2.len < 0.8 * u) continue; // ring ≥ ~2u (merge-tolerant)
+      const cx = dot.start + dot.len / 2;
+      const cy = verifyBullseyeColumn(m, Math.round(cx), y, u);
+      if (cy < 0) continue;
+      let hit = null;
+      for (const c of clusters) {
+        if (Math.abs(c.x - cx) < 4 * u && Math.abs(c.y - cy) < 4 * u && c.u / u < 1.6 && u / c.u < 1.6) { hit = c; break; }
+      }
+      if (hit) {
+        hit.x = (hit.x * hit.votes + cx) / (hit.votes + 1);
+        hit.y = (hit.y * hit.votes + cy) / (hit.votes + 1);
+        hit.u = (hit.u * hit.votes + u) / (hit.votes + 1);
+        hit.votes++;
+      } else clusters.push({ x: cx, y: cy, u, votes: 1 });
+    }
+  }
+  return clusters.sort((a, b) => b.votes - a.votes).slice(0, 3);
+}
+
+// Disc radius from a found pupil: walk 16 rays outward and record where the
+// ink ends and the (mandatory) white quiet zone begins; the median is robust
+// to clutter touching one side. Returns a radius in px, or 0.
+function discRadius(m, cx, cy, u) {
+  const { W, H, white } = m;
+  const radii = [];
+  for (let s = 0; s < 16; s++) {
+    const th = (s / 16) * 2 * Math.PI;
+    const dx = Math.sin(th);
+    const dy = -Math.cos(th);
+    let lastInk = 0;
+    let whiteRun = 0;
+    const maxR = Math.min(W, H); // generous; the quiet-zone rule stops the walk
+    for (let r = 4 * u; r < maxR; r += 1) {
+      const x = Math.round(cx + r * dx);
+      const y = Math.round(cy + r * dy);
+      if (x < 0 || y < 0 || x >= W || y >= H) break;
+      if (white[y * W + x]) {
+        if (++whiteRun > 4 * u && lastInk) { radii.push(lastInk); break; }
+      } else {
+        whiteRun = 0;
+        lastInk = r;
+      }
+    }
+  }
+  if (radii.length < 6) return 0;
+  radii.sort((a, b) => a - b);
+  return radii[radii.length >> 1];
+}
+
+// Localization seeds, best-guess first: the classic white-field estimate, then
+// pupil-bullseye candidates found in clutter (skipping near-duplicates).
+function buildSeeds(maps, cx, cy, radiusPx, ellipse) {
+  const seeds = [{ circle: { O: [cx, cy], M: [radiusPx, 0, 0, radiusPx] }, ellipse }];
+  for (const b of findBullseyes(maps)) {
+    const r = discRadius(maps, b.x, b.y, b.u);
+    if (!r) continue;
+    if (Math.hypot(b.x - cx, b.y - cy) < 3 * b.u && r / radiusPx > 0.85 && r / radiusPx < 1.18) continue; // same as locate()
+    seeds.push({
+      circle: { O: [b.x, b.y], M: [r, 0, 0, r] },
+      ellipse: fitEllipse(maps, b.x, b.y, r),
+    });
+  }
+  return seeds;
+}
+
+export const _internal = { buildMaps, locate, fitEllipse, rayCandidates, snapScore, attempt, findBullseyes, discRadius };
 
 // ── Decoding ─────────────────────────────────────────────────────────────────
 
@@ -739,16 +868,19 @@ function tryPose(ctx, K, N, O, M, theta0, ax, ay) {
 }
 
 // Phase 1 — planar: lock onto the registration ray, on both the circle and the
-// fitted ellipse. Covers rotation, scale, translation, noise, blur, mild perspective.
+// fitted ellipse of every localization seed. Covers rotation, scale,
+// translation, noise, blur, mild perspective — centred or in clutter.
 function decodePlanar(ctx) {
-  for (const { O, M } of [ctx.circle, ctx.ellipse]) {
-    const angles = rayCandidates(ctx.maps, O, M);
-    for (const K of viableK(ctx.p, M)) {
-      if (now() > ctx.deadline) return null;
-      const N = getN(K, ctx.p);
-      for (const theta0 of angles) {
-        const hit = tryPose(ctx, K, N, O, M, theta0, 0, 0);
-        if (hit) return hit;
+  for (const seed of ctx.seeds) {
+    for (const { O, M } of [seed.circle, seed.ellipse]) {
+      const angles = rayCandidates(ctx.maps, O, M);
+      for (const K of viableK(ctx.p, M)) {
+        if (now() > ctx.deadline) return null;
+        const N = getN(K, ctx.p);
+        for (const theta0 of angles) {
+          const hit = tryPose(ctx, K, N, O, M, theta0, 0, 0);
+          if (hit) return hit;
+        }
       }
     }
   }
@@ -760,8 +892,9 @@ function decodePlanar(ctx) {
 // RS+CRC decide. Only for near-circular, actually-damaged symbols — otherwise
 // phase 1 or the perspective phase already applies.
 function decodeScratchedRay(ctx) {
-  if (axisRatio(ctx.ellipse.M) >= NEAR_CIRCULAR || !maskHasInk(ctx.damage)) return null;
-  const { O, M } = ctx.circle;
+  const primary = ctx.seeds[0];
+  if (axisRatio(primary.ellipse.M) >= NEAR_CIRCULAR || !maskHasInk(ctx.damage)) return null;
+  const { O, M } = primary.circle;
   for (const K of viableK(ctx.p, M)) {
     const N = getN(K, ctx.p);
     const stepDeg = Math.max(1.5, 360 / N[K - 1] / 3); // ≤ 240 steps
@@ -817,20 +950,22 @@ function refinePose(ctx, K, N, O, M, seed) {
 // arbiter — polishing the winner off-grid for steep tilt.
 function decodePerspective(ctx) {
   const { maps, p } = ctx;
-  const { O, M } = ctx.ellipse;
-  const offsets = offsetCandidates(coreOffset(maps, O, M));
-  for (const K of schedulesByFit(p, M)) {
-    const N = getN(K, p);
-    for (const [ax, ay] of offsets) {
-      if (now() > ctx.deadline) return null; // out of budget — give up gracefully
-      for (const theta0 of thetaCandidates(maps, p, K, N, O, M, ax, ay)) {
-        const hit = tryPose(ctx, K, N, O, M, theta0, ax, ay);
-        if (hit) return hit;
-        // Off-grid polish (ray-darkness driven) for tilt between grid points.
-        const r = refinePose(ctx, K, N, O, M, { ax, ay, theta0 });
-        if (r.ax !== ax || r.ay !== ay || r.theta0 !== theta0) {
-          const hit2 = tryPose(ctx, K, N, O, M, r.theta0, r.ax, r.ay);
-          if (hit2) return hit2;
+  for (const seed of ctx.seeds) {
+    const { O, M } = seed.ellipse;
+    const offsets = offsetCandidates(coreOffset(maps, O, M));
+    for (const K of schedulesByFit(p, M)) {
+      const N = getN(K, p);
+      for (const [ax, ay] of offsets) {
+        if (now() > ctx.deadline) return null; // out of budget — give up gracefully
+        for (const theta0 of thetaCandidates(maps, p, K, N, O, M, ax, ay)) {
+          const hit = tryPose(ctx, K, N, O, M, theta0, ax, ay);
+          if (hit) return hit;
+          // Off-grid polish (ray-darkness driven) for tilt between grid points.
+          const r = refinePose(ctx, K, N, O, M, { ax, ay, theta0 });
+          if (r.ax !== ax || r.ay !== ay || r.theta0 !== theta0) {
+            const hit2 = tryPose(ctx, K, N, O, M, r.theta0, r.ax, r.ay);
+            if (hit2) return hit2;
+          }
         }
       }
     }
@@ -849,11 +984,14 @@ export function decodeColorRobust(rawGrid, opts = {}) {
   const maps = buildMaps(grid);
   const { cx, cy, radiusPx } = locate(grid);
   const ellipse = fitEllipse(maps, cx, cy, radiusPx);
+  const seeds = buildSeeds(maps, cx, cy, radiusPx, ellipse);
   const ctx = {
     maps,
     p,
-    circle: { O: [cx, cy], M: [radiusPx, 0, 0, radiusPx] },
-    ellipse,
+    // Localization seeds, best-guess first: the classic whole-image estimate
+    // (exact on scans/renders) plus pupil-bullseye candidates, which find the
+    // symbol in a CLUTTERED frame where the global centroid is meaningless.
+    seeds,
     damage: damageMask(maps, ellipse.O, ellipse.M),
     // Optional wall-clock budget (ms). The geometry search is exhaustive, so a
     // hard input (or a large payload) can otherwise run for seconds; interactive

@@ -412,3 +412,67 @@ test("robust decode: shadow + warm cast composes with the global stretch", () =>
   const grid = relight(shot, [1.0, 0.88, 0.72], 0);
   assert.equal(decodeColorRobust(grid).text, MSG);
 });
+
+// Simulate a camera frame: paste the code (scaled, off-center, optionally
+// rotated) into a cluttered scene — dark desk, bright screen area, colored
+// boxes. This is what the global-centroid localizer can NOT handle; the
+// pupil-bullseye search must find the symbol.
+function scene(code, { scale = 0.55, ox = 250, oy = 160, S = 640, dark = false, seed = 99 } = {}) {
+  const data = new Uint8Array(S * S * 3);
+  const rand = rng(seed);
+  for (let y = 0; y < S; y++)
+    for (let x = 0; x < S; x++) {
+      const o = (y * S + x) * 3;
+      const bg = dark ? 25 + rand() * 25 : 150 + rand() * 40;
+      data[o] = bg + 15; data[o + 1] = bg; data[o + 2] = bg - 10;
+    }
+  if (!dark) {
+    for (let y = 60; y < 560; y++)
+      for (let x = 100; x < 620; x++) {
+        const o = (y * S + x) * 3;
+        data[o] = 246; data[o + 1] = 248; data[o + 2] = 250;
+      }
+  }
+  for (const [bx, by, bw, bh, col] of [
+    [120, 80, 90, 40, [200, 60, 50]],
+    [480, 460, 100, 70, [60, 120, 200]],
+    [140, 470, 80, 60, [230, 190, 60]],
+  ]) {
+    for (let y = by; y < by + bh; y++)
+      for (let x = bx; x < bx + bw; x++) {
+        const o = (y * S + x) * 3;
+        data[o] = col[0]; data[o + 1] = col[1]; data[o + 2] = col[2];
+      }
+  }
+  const D = code.width;
+  for (let y = 0; y < D * scale; y++)
+    for (let x = 0; x < D * scale; x++) {
+      const sx = Math.min(D - 1, Math.round(x / scale));
+      const sy = Math.min(D - 1, Math.round(y / scale));
+      const si = (sy * D + sx) * 3;
+      const di = ((y + oy) * S + (x + ox)) * 3;
+      data[di] = code.data[si]; data[di + 1] = code.data[si + 1]; data[di + 2] = code.data[si + 2];
+    }
+  return { width: S, height: S, data };
+}
+
+test("robust decode: code in a cluttered scene (camera frame, off-center)", () => {
+  const grid = scene(renderColorRaster(encodeColor(MSG)));
+  assert.equal(decodeColorRobust(grid, { budgetMs: 8000 }).text, MSG);
+});
+
+test("robust decode: cluttered scene on a dark background", () => {
+  const grid = scene(renderColorRaster(encodeColor(MSG)), { dark: true, ox: 200, oy: 220, scale: 0.5 });
+  assert.equal(decodeColorRobust(grid, { budgetMs: 8000 }).text, MSG);
+});
+
+test("robust decode: rotated code in a cluttered scene", () => {
+  const rotated = transform(renderColorRaster(encodeColor(MSG)), { angle: (52 * Math.PI) / 180 });
+  const grid = scene(rotated, { scale: 0.6, ox: 180, oy: 140 });
+  assert.equal(decodeColorRobust(grid, { budgetMs: 8000 }).text, MSG);
+});
+
+test("robust decode: cluttered scene with markers stays decodable", () => {
+  const grid = scene(renderColorRaster(encodeColor(MSG, { markers: true })), { scale: 0.6, ox: 200, oy: 180 });
+  assert.equal(decodeColorRobust(grid, { budgetMs: 8000 }).text, MSG);
+});
