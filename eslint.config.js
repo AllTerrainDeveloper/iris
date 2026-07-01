@@ -25,12 +25,12 @@ export default [
     languageOptions: { globals: { ...globals.node, ...globals.browser, PIXI: "readonly" } },
   },
   {
-    files: ["bin/**/*.js", "test/**/*.js", "eslint.config.js"],
+    files: ["bin/**/*.js", "test/**/*.js", "tools/**/*.js", "eslint.config.js"],
     languageOptions: { globals: { ...globals.node } },
   },
   // The web generator runs in the browser (Tailwind and PixiJS loaded via CDN).
   {
     files: ["web/**/*.js"],
-    languageOptions: { globals: { ...globals.browser, tailwind: "readonly", PIXI: "readonly" } },
+    languageOptions: { globals: { ...globals.browser, tailwind: "readonly", PIXI: "readonly", ort: "readonly" } },
   },
 ];

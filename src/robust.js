@@ -17,15 +17,164 @@
 // precomputed ONCE, so the thousands of geometry evaluations are O(1) lookups.
 
 import { segCounts, ringMidU } from "./params.js";
-import { rsCorrect } from "./rs.js";
 import { bitsToBytes } from "./bits.js";
-import { readFrame } from "./frame.js";
-import { COLOR_PROFILE, SCHEDULES_COLOR, PARITY_LEVELS, parityFor, PALETTE } from "./color.js";
+import { decodeStream } from "./blocks.js";
+import { COLOR_PROFILE, SCHEDULES_COLOR, PALETTE } from "./color.js";
 
 // Monotonic clock for the optional decode budget (browser + Node).
 const now = (typeof performance !== "undefined" && performance.now)
   ? () => performance.now()
   : () => Date.now();
+
+// ── Photometric calibration ──────────────────────────────────────────────────
+
+// Flatten spatially varying illumination (a shadow across the print). The local
+// white level is estimated per tile from near-white pixels — min(r,g,b) is high
+// ONLY for whites (saturated palette colors and ink drop at least one channel) —
+// as the tile's 95th percentile of that min. Tiles that saw no white (deep in
+// the pupil, or all-color cells) inherit the level from their neighbours; the
+// field is smoothed, bilinearly upsampled, and each pixel is scaled so paper
+// reads uniformly white. Gain is relative to the GLOBAL white point, so this is
+// an identity on evenly lit images; the global stretch below then fixes overall
+// level and per-channel casts.
+function flattenIllumination(grid) {
+  const { width: W, height: H, data } = grid;
+  const TILE = 48;
+  const tx = Math.ceil(W / TILE);
+  const ty = Math.ceil(H / TILE);
+  const hists = Array.from({ length: tx * ty }, () => new Uint32Array(256));
+  const counts = new Uint32Array(tx * ty);
+  for (let y = 0; y < H; y++) {
+    const tyi = (y / TILE) | 0;
+    for (let x = 0; x < W; x++) {
+      const o = (y * W + x) * 3;
+      const w = Math.min(data[o], data[o + 1], data[o + 2]);
+      const t = tyi * tx + ((x / TILE) | 0);
+      hists[t][w]++;
+      counts[t]++;
+    }
+  }
+  const p95 = (h, n) => {
+    let acc = 0;
+    for (let v = 255; v >= 0; v--) {
+      acc += h[v];
+      if (acc >= 0.05 * n) return v;
+    }
+    return 0;
+  };
+  const field = new Float32Array(tx * ty);
+  const valid = new Uint8Array(tx * ty);
+  let globalWhite = 0;
+  for (let t = 0; t < tx * ty; t++) {
+    field[t] = p95(hists[t], counts[t]);
+    valid[t] = field[t] >= 60 ? 1 : 0; // below this there's no credible paper white
+    if (field[t] > globalWhite) globalWhite = field[t];
+  }
+  if (globalWhite < 60) return grid; // no white anywhere — nothing to calibrate
+  // Fill white-less tiles from neighbours (repeat until the field is dense).
+  for (let pass = 0; pass < tx + ty; pass++) {
+    let missing = 0;
+    for (let t = 0; t < tx * ty; t++) {
+      if (valid[t]) continue;
+      let s = 0;
+      let n = 0;
+      const x = t % tx;
+      const y = (t / tx) | 0;
+      for (const [ox, oy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const xx = x + ox;
+        const yy = y + oy;
+        if (xx < 0 || yy < 0 || xx >= tx || yy >= ty) continue;
+        const tt = yy * tx + xx;
+        if (valid[tt]) { s += field[tt]; n++; }
+      }
+      if (n) { field[t] = s / n; valid[t] = 2; } // 2 = filled this pass
+      else missing++;
+    }
+    for (let t = 0; t < tx * ty; t++) if (valid[t] === 2) valid[t] = 1;
+    if (!missing) break;
+  }
+  // One smoothing pass so tile seams don't imprint on the gain field.
+  const smooth = new Float32Array(tx * ty);
+  for (let y = 0; y < ty; y++)
+    for (let x = 0; x < tx; x++) {
+      let s = 0;
+      let n = 0;
+      for (let oy = -1; oy <= 1; oy++)
+        for (let ox = -1; ox <= 1; ox++) {
+          const xx = x + ox;
+          const yy = y + oy;
+          if (xx < 0 || yy < 0 || xx >= tx || yy >= ty) continue;
+          s += field[yy * tx + xx];
+          n++;
+        }
+      smooth[y * tx + x] = s / n;
+    }
+  // Bilinear gain per pixel, capped so deep shadows don't explode sensor noise.
+  const out = new Uint8Array(W * H * 3);
+  for (let y = 0; y < H; y++) {
+    const fy = Math.min(ty - 1, Math.max(0, y / TILE - 0.5));
+    const y0 = fy | 0;
+    const y1 = Math.min(ty - 1, y0 + 1);
+    const wy = fy - y0;
+    for (let x = 0; x < W; x++) {
+      const fx = Math.min(tx - 1, Math.max(0, x / TILE - 0.5));
+      const x0 = fx | 0;
+      const x1 = Math.min(tx - 1, x0 + 1);
+      const wx = fx - x0;
+      const local =
+        smooth[y0 * tx + x0] * (1 - wx) * (1 - wy) +
+        smooth[y0 * tx + x1] * wx * (1 - wy) +
+        smooth[y1 * tx + x0] * (1 - wx) * wy +
+        smooth[y1 * tx + x1] * wx * wy;
+      const gain = Math.min(4, globalWhite / Math.max(24, local));
+      const o = (y * W + x) * 3;
+      out[o] = Math.min(255, data[o] * gain);
+      out[o + 1] = Math.min(255, data[o + 1] * gain);
+      out[o + 2] = Math.min(255, data[o + 2] * gain);
+    }
+  }
+  return { width: W, height: H, data: out };
+}
+
+// Per-channel levels stretch: map each channel's 1st percentile to 0 and its
+// 99th to 255. A symbol always contains near-black ink (pupil, ray) and a big
+// near-white region (background/quiet zone), so those percentiles ARE the
+// image's black and white points — undoing dim lighting AND color casts (a
+// warm cast lowers the blue white-point; the stretch restores it) before any
+// pixel is classified against the pure palette. Identity on clean renders.
+// Spatially varying light (a shadow) is flattened first, so the stretch sees a
+// uniformly lit image.
+export function normalizeGrid(rawGrid) {
+  const grid = flattenIllumination(rawGrid);
+  const { width, height, data } = grid;
+  const n = width * height;
+  const hist = [new Uint32Array(256), new Uint32Array(256), new Uint32Array(256)];
+  for (let i = 0, o = 0; i < n; i++, o += 3) {
+    hist[0][data[o]]++;
+    hist[1][data[o + 1]]++;
+    hist[2][data[o + 2]]++;
+  }
+  const percentile = (h, q) => {
+    const target = q * n;
+    let acc = 0;
+    for (let v = 0; v < 256; v++) {
+      acc += h[v];
+      if (acc >= target) return v;
+    }
+    return 255;
+  };
+  const out = new Uint8Array(n * 3);
+  for (let c = 0; c < 3; c++) {
+    const lo = percentile(hist[c], 0.01);
+    const hi = percentile(hist[c], 0.99);
+    if (hi - lo < 32) return grid; // flat image — no contrast to calibrate from
+    const scale = 255 / (hi - lo);
+    const lut = new Uint8Array(256);
+    for (let v = 0; v < 256; v++) lut[v] = Math.max(0, Math.min(255, Math.round((v - lo) * scale)));
+    for (let i = 0, o = c; i < n; i++, o += 3) out[o] = lut[data[o]];
+  }
+  return { width, height, data: out };
+}
 
 // ── Pixel maps & sampling ────────────────────────────────────────────────────
 
@@ -483,18 +632,10 @@ function attempt(m, p, K, N, O, M, theta0, ax, ay, damage) {
   const erasures = [...eraseBytes].sort((a, b) => a - b);
   const code = bitsToBytes(bits.slice(0, totalBytes * 8));
 
-  // Sample once; try each adaptive parity level (the encoder used the highest
-  // that fit the payload). Erasures (scratched cells) are passed when they fit.
-  for (const level of PARITY_LEVELS) {
-    const parity = parityFor(totalBytes, level);
-    const dataBytes = totalBytes - parity;
-    if (dataBytes < 4) continue;
-    const corrected = rsCorrect(code, parity, erasures.length <= parity ? erasures : []);
-    if (!corrected) continue;
-    const text = readFrame(corrected, dataBytes);
-    if (text !== null) return text;
-  }
-  return null;
+  // Sample once; decodeStream tries each adaptive parity level (the encoder
+  // used the highest that fit) across the interleaved RS blocks. Erasures
+  // (scratched cells) are routed to their blocks and used where they fit.
+  return decodeStream(code, totalBytes, erasures);
 }
 
 // ── Search configuration & geometry helpers ──────────────────────────────────
@@ -702,8 +843,9 @@ function decodePerspective(ctx) {
  * increasing cost — planar ray-lock, scratched-ray brute force, then full
  * perspective search — and returns { text, params, geom } or throws.
  */
-export function decodeColorRobust(grid, opts = {}) {
+export function decodeColorRobust(rawGrid, opts = {}) {
   const p = { ...COLOR_PROFILE, ...(opts.profile || {}) };
+  const grid = normalizeGrid(rawGrid); // undo dim lighting / color cast first
   const maps = buildMaps(grid);
   const { cx, cy, radiusPx } = locate(grid);
   const ellipse = fitEllipse(maps, cx, cy, radiusPx);

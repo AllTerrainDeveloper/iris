@@ -7,13 +7,41 @@ import { rsCorrect } from "./rs.js";
 import { bitsToBytes } from "./bits.js";
 import { readFrame } from "./frame.js";
 
-const INK = 128; // gray < INK counts as ink
+// Otsu's threshold (AGENTS.md §3 step 1): the gray level that best separates
+// the ink and paper populations. On a crisp render this lands mid-gap (same
+// behaviour as a fixed 128); on a low-contrast or brightness-shifted scan it
+// follows the histogram instead of silently misreading everything.
+function otsuThreshold(data) {
+  const hist = new Uint32Array(256);
+  for (let i = 0; i < data.length; i++) hist[data[i]]++;
+  let sum = 0;
+  for (let v = 0; v < 256; v++) sum += v * hist[v];
+  let sumB = 0;
+  let wB = 0;
+  let best = 128;
+  let bestVar = -1;
+  for (let v = 0; v < 256; v++) {
+    wB += hist[v];
+    if (wB === 0) continue;
+    const wF = data.length - wB;
+    if (wF === 0) break;
+    sumB += v * hist[v];
+    const mB = sumB / wB;
+    const mF = (sum - sumB) / wF;
+    const between = wB * wF * (mB - mF) * (mB - mF);
+    if (between > bestVar) {
+      bestVar = between;
+      best = v + 1; // gray < threshold counts as ink
+    }
+  }
+  return best;
+}
 
 // Sample one data cell: 3x3 majority vote at the cell center (AGENTS.md §3 step 6).
-function sampleBit(grid, cx, cy, ru, theta, u) {
+function sampleBit(grid, cx, cy, ru, theta, u, ink) {
   const px = cx + ru * u * Math.sin(theta);
   const py = cy - ru * u * Math.cos(theta);
-  let ink = 0;
+  let inked = 0;
   let tot = 0;
   for (let oy = -1; oy <= 1; oy++) {
     for (let ox = -1; ox <= 1; ox++) {
@@ -21,10 +49,10 @@ function sampleBit(grid, cx, cy, ru, theta, u) {
       const y = Math.round(py) + oy;
       if (x < 0 || y < 0 || x >= grid.width || y >= grid.height) continue;
       tot++;
-      if (grid.data[y * grid.width + x] < INK) ink++;
+      if (grid.data[y * grid.width + x] < ink) inked++;
     }
   }
-  return ink * 2 > tot ? 1 : 0;
+  return inked * 2 > tot ? 1 : 0;
 }
 
 /**
@@ -36,6 +64,7 @@ export function decodeRaster(grid, opts = {}) {
   // Clean renders are centered; real-world localization is Track-2 (AGENTS.md §3).
   const cx = grid.width / 2;
   const cy = grid.height / 2;
+  const ink = otsuThreshold(grid.data); // gray < ink counts as ink
 
   for (const K of SCHEDULES) {
     const radiusU = p.Rp + K * p.dr + p.quiet;
@@ -49,7 +78,7 @@ export function decodeRaster(grid, opts = {}) {
       const dk = (2 * Math.PI) / N[k];
       for (let i = 0; i < N[k]; i++) {
         const theta = (i + 0.65) * dk; // center of the trailing 70% data cell
-        bits.push(sampleBit(grid, cx, cy, rmid, theta, u));
+        bits.push(sampleBit(grid, cx, cy, rmid, theta, u, ink));
       }
     }
 

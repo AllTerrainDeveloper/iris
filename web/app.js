@@ -9,6 +9,7 @@ const $ = (id) => document.getElementById(id);
 const els = {
   text: $("text"),
   style: $("ctlStyle"),
+  markers: $("ctlMarkers"),
   charCount: $("charCount"),
   capacity: $("capacity"),
   preview: $("preview"),
@@ -74,7 +75,7 @@ function render() {
 
   let symbol;
   try {
-    symbol = encodeColor(text);
+    symbol = encodeColor(text, { markers: !!(els.markers && els.markers.checked) });
   } catch (err) {
     showError(err.message);
     return;
@@ -179,4 +180,5 @@ els.copySvg.addEventListener("click", async () => {
 
 els.text.addEventListener("input", render);
 els.style.addEventListener("change", render);
+if (els.markers) els.markers.addEventListener("change", render);
 render();

@@ -9,7 +9,7 @@
 // Ring boundaries are kept crisp on purpose: blending radially too would smear
 // the concentric structure into noise.
 
-import { PALETTE, WHITE_TINT_RGB } from "./color.js";
+import { PALETTE, WHITE_TINT_RGB, paintMarkers } from "./color.js";
 import { imageSizePx } from "./params.js";
 
 const lerp = (a, b, t) => [
@@ -82,5 +82,8 @@ export function renderWheelGrid(sym, opts = {}) {
       }
     }
   }
+  // RGB quiet-zone markers, same fiducials as every other renderer (`u` is the
+  // supersampled pixel scale, so the override keeps them at the right radius).
+  if (p.markers) paintMarkers(data, D, c, c, { ...p, u });
   return { width: D, height: D, data };
 }

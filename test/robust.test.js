@@ -335,3 +335,80 @@ test("robust decode: speed (<60ms typical payload)", () => {
   const ms = performance.now() - t0;
   assert.ok(ms < 60, `decode took ${ms.toFixed(1)}ms`);
 });
+
+// Simulate lighting: per-channel gain (color cast) + offset (ambient bounce).
+function relight(grid, gains, offset = 0) {
+  const out = new Uint8Array(grid.data.length);
+  for (let i = 0; i < grid.data.length; i++) {
+    out[i] = Math.max(0, Math.min(255, grid.data[i] * gains[i % 3] + offset));
+  }
+  return { width: grid.width, height: grid.height, data: out };
+}
+
+test("robust decode: dim warm lighting (photometric calibration)", () => {
+  const base = renderColorRaster(encodeColor(MSG));
+  // Warm indoor light at ~half brightness — every channel off, blue worst.
+  const grid = relight(base, [0.62, 0.55, 0.42], 12);
+  assert.equal(decodeColorRobust(grid).text, MSG);
+});
+
+test("robust decode: cool overexposed lighting + rotation", () => {
+  const base = blur(renderColorRaster(encodeColor(MSG)));
+  const lit = relight(base, [0.7, 0.8, 0.9], 40);
+  const grid = transform(lit, { angle: (117 * Math.PI) / 180 });
+  assert.equal(decodeColorRobust(grid).text, MSG);
+});
+
+test("robust decode: dim light + noise + scratch (calibration composes)", () => {
+  // Scratch the print, photograph it rotated with sensor noise, under dim
+  // light — the lighting applies to the WHOLE capture, scratch included.
+  const base = renderColorRaster(encodeColor(MSG));
+  const cx = base.width / 2;
+  for (let r = 0; r < base.width / 2; r++) {
+    for (let a = -6; a <= 6; a++) {
+      const theta = ((a + 45) * Math.PI) / 180;
+      const x = Math.round(cx + r * Math.sin(theta));
+      const y = Math.round(cx - r * Math.cos(theta));
+      if (x >= 0 && y >= 0 && x < base.width && y < base.height) {
+        const o = (y * base.width + x) * 3;
+        base.data[o] = base.data[o + 1] = base.data[o + 2] = 255;
+      }
+    }
+  }
+  const shot = transform(base, { angle: (-30 * Math.PI) / 180, noise: 0.02, seed: 3 });
+  const grid = relight(shot, [0.6, 0.58, 0.5], 10);
+  assert.equal(decodeColorRobust(grid).text, MSG);
+});
+
+// Spatially varying light: linear shadow ramp across the capture.
+function shadow(grid, { from = 1.0, to = 0.4, offset = 6, vertical = false } = {}) {
+  const { width: W, height: H, data } = grid;
+  const out = new Uint8Array(data.length);
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const t = vertical ? y / H : x / W;
+      const gain = from + (to - from) * t;
+      const o = (y * W + x) * 3;
+      for (let c = 0; c < 3; c++) out[o + c] = Math.max(0, Math.min(255, data[o + c] * gain + offset));
+    }
+  }
+  return { width: W, height: H, data: out };
+}
+
+test("robust decode: shadow gradient across the symbol", () => {
+  const grid = shadow(renderColorRaster(encodeColor(MSG)), { from: 1.0, to: 0.4 });
+  assert.equal(decodeColorRobust(grid).text, MSG);
+});
+
+test("robust decode: vertical shadow + rotation + blur", () => {
+  const base = blur(renderColorRaster(encodeColor(MSG)));
+  const shot = transform(base, { angle: (63 * Math.PI) / 180 });
+  const grid = shadow(shot, { from: 0.95, to: 0.5, vertical: true });
+  assert.equal(decodeColorRobust(grid).text, MSG);
+});
+
+test("robust decode: shadow + warm cast composes with the global stretch", () => {
+  const shot = shadow(renderColorRaster(encodeColor(MSG)), { from: 1.0, to: 0.55 });
+  const grid = relight(shot, [1.0, 0.88, 0.72], 0);
+  assert.equal(decodeColorRobust(grid).text, MSG);
+});

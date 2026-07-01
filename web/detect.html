@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>IRIS — detector test harness</title>
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='none' stroke='%23a78bfa' stroke-width='2'/%3E%3Ccircle cx='16' cy='16' r='7' fill='none' stroke='%23818cf8' stroke-width='2'/%3E%3Ccircle cx='16' cy='16' r='2' fill='%23a78bfa'/%3E%3C/svg%3E"
+    />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- onnxruntime-web: only used when the ONNX detector is selected. -->
+    <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
+    <style>
+      body { background: #0b0f1a; color: #e5e7eb; }
+      .panel { background: #111827; border: 1px solid #1f2937; }
+      canvas { background: #000; border-radius: 12px; max-width: 100%; height: auto; image-rendering: auto; }
+      label.ctl { font-size: 12px; color: #9ca3af; display: block; margin-bottom: 4px; }
+      select, input[type="range"] { width: 100%; }
+      select, .btn { background: #1f2937; border: 1px solid #374151; border-radius: 8px; color: #e5e7eb; padding: 6px 10px; }
+      .btn { cursor: pointer; }
+      .btn:hover { background: #374151; }
+      .btn-primary { background: #4f46e5; border-color: #6366f1; }
+      .btn-primary:hover { background: #6366f1; }
+      #info { font-family: ui-monospace, Menlo, monospace; font-size: 12.5px; line-height: 1.7; }
+      #info .k { display: inline-block; width: 72px; color: #818cf8; }
+      #info .muted { color: #6b7280; }
+      #info hr { border-color: #1f2937; margin: 8px 0; }
+      #info .err { margin-top: 6px; color: #fbbf24; }
+      #info .dec { margin-top: 4px; }
+      #info .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; }
+      #info .dot.pred { background: #f43f5e; }
+      #info .dot.truth { background: #38bdf8; }
+      #drop { border: 1px dashed #374151; border-radius: 8px; padding: 10px; text-align: center; font-size: 12px; color: #9ca3af; cursor: pointer; }
+      #drop.over { border-color: #6366f1; background: #1e1b4b; }
+      .row { margin-bottom: 14px; }
+    </style>
+  </head>
+  <body class="h-full">
+    <div class="max-w-6xl mx-auto p-6">
+      <header class="mb-5">
+        <a href="./index.html" class="text-sm text-gray-400 hover:text-white">← IRIS generator</a>
+        <h1 class="text-2xl font-bold mt-1">IRIS — detector test harness</h1>
+        <p class="text-sm text-gray-400 mt-1">
+          Random captures (procedural scenes or your own photos) with the code pasted at any
+          size / rotation / perspective / blur / noise. The full two-stage pipeline runs:
+          the detector locates the code (<span style="color:#f43f5e">prediction</span> vs
+          <span style="color:#38bdf8">ground truth</span>), then its geometry is used to crop
+          the disc and <b>actually decode the payload</b> with <code>src/robust.js</code>.
+          Dial the <b>Distortion</b> slider to see decoding hold up, or drop it to clean.
+        </p>
+      </header>
+
+      <div class="grid md:grid-cols-[1fr_320px] gap-6">
+        <div class="panel rounded-xl p-4 flex items-center justify-center">
+          <canvas id="view" width="512" height="512"></canvas>
+        </div>
+
+        <div class="panel rounded-xl p-4">
+          <div class="row">
+            <button id="next" class="btn btn-primary w-full font-semibold">⟳ New random capture</button>
+          </div>
+
+          <div class="row">
+            <label class="ctl">Background source</label>
+            <select id="source">
+              <option value="procedural">Procedural scene</option>
+              <option value="photo">My photos (drop below)</option>
+            </select>
+          </div>
+
+          <div class="row">
+            <label class="ctl">Capture envelope</label>
+            <select id="envelope">
+              <option value="realistic">Realistic (detector's job)</option>
+              <option value="torture">Torture (decoder stress — scratches)</option>
+            </select>
+          </div>
+
+          <div class="row">
+            <label class="ctl">Distortion — <span id="distortVal">100%</span></label>
+            <input id="distort" type="range" min="0" max="100" step="1" value="100" />
+          </div>
+
+          <div class="row">
+            <label class="ctl">Detector</label>
+            <select id="detector">
+              <option value="oracle">Oracle (ground truth)</option>
+              <option value="onnx">ONNX model</option>
+            </select>
+          </div>
+
+          <div class="row" id="jitterRow">
+            <label class="ctl">Oracle jitter — <span id="jitterVal">0 px</span></label>
+            <input id="jitter" type="range" min="0" max="40" step="1" value="0" />
+          </div>
+
+          <div class="row" id="onnxRow" style="display:none">
+            <label class="ctl">Model (.onnx)</label>
+            <input id="onnxFile" type="file" accept=".onnx" class="text-xs" />
+            <div id="onnxStatus" class="text-xs text-gray-400 mt-1">no model loaded</div>
+          </div>
+
+          <div class="row">
+            <label class="ctl">Photos</label>
+            <div id="drop">drop image files here, or
+              <label class="underline cursor-pointer">browse<input id="photoInput" type="file" accept="image/*" multiple hidden /></label>
+            </div>
+            <div id="photoCount" class="text-xs text-gray-500 mt-1">0 photo(s)</div>
+          </div>
+
+          <div class="row text-sm">
+            <label class="inline-flex items-center gap-2"><input id="showTruth" type="checkbox" checked /> show ground truth</label><br/>
+            <label class="inline-flex items-center gap-2 mt-1"><input id="noColor" type="checkbox" /> disable illuminant shift</label><br/>
+            <label class="inline-flex items-center gap-2 mt-1"><input id="markersToggle" type="checkbox" /> RGB markers <span class="text-xs" style="color:#6b7280">(quiet-zone, free)</span></label>
+          </div>
+
+          <div id="info" class="mt-2"></div>
+        </div>
+      </div>
+
+      <p class="text-xs text-gray-500 mt-6">
+        Serve the repo <b>root</b> so the page can import <code>/src</code> and <code>/tools</code>:
+        <code>python3 -m http.server 8765</code> → <code>http://localhost:8765/web/detect.html</code>.
+        The ONNX pre/post-processing contract is documented at the top of <code>web/detect.js</code>.
+      </p>
+    </div>
+
+    <script type="module" src="./detect.js"></script>
+  </body>
+</html>

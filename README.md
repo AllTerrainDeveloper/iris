@@ -161,7 +161,7 @@ and geometry helpers (`segCounts`, `capacityBits`, `imageSizePx`). Granular subp
 | Localization    | central **pupil** (bullseye)                                         |
 | Registration    | **north** spur fixes rotation (ellipse-fit perspective is Track-2)   |
 | Sampling        | concentric **rings** of angular **segments**, each **self-marked**   |
-| Error correction| **Reed–Solomon** over GF(256), 30% parity                           |
+| Error correction| **Reed–Solomon** over GF(256) in **interleaved blocks** (≤255 B each), adaptive 30–70% parity |
 
 Each segment carries its own start **tick** (leading 30%, always inked) so the decoder
 re-syncs at every cell — this is what makes IRIS strong against radial scratches. The
@@ -171,14 +171,19 @@ trailing 70% is the 1-bit **data cell**.
 
 ```
 src/
-  params.js      geometry + ring schedules (N_k, image size)
+  params.js      geometry + ring schedules (N_k, image size), marker geometry
   rs.js          Reed–Solomon over GF(256)
+  blocks.js      interleaved RS block structure (≤255 B blocks) + adaptive parity
   bits.js        bit packing + CRC-16
+  frame.js       payload frame (length + CRC-16), shared by every profile
   encode.js      mono: text -> Symbol
   render-svg.js  mono: Symbol -> SVG
   decode.js      mono: grid -> text
   color.js       v2 color: 3-bit cells, palette, encode/render/decode
-  robust.js      robust decode: find center/scale/rotation/perspective, then sample + RS
+  robust.js      robust decode: photometric calibration, center/scale/rotation/
+                 perspective recovery, scratch erasures, then sample + RS
+  markers.js     optional RGB quiet-zone markers: homography-based decode
+  wheel-render.js decorative blended "colour wheel" raster (still decodable)
   pixi-render.js render engine: PixiJS/WebGL metaball "blobs" (iris-code/pixi)
   raster.js      Symbol -> grid; PGM (mono) + PPM (color) I/O
   index.js       public API
@@ -272,6 +277,13 @@ Focused on the **clean-render round trip** (AGENTS.md Track-1):
   - **Adaptive ECC** — short payloads spend their spare symbol space on parity (up to
     ~70%), so even **two scratches at an odd angle** recover (and fast, because high parity
     means decode succeeds in the early phase instead of falling through to slow fallbacks).
+  - **Interleaved RS blocks** — RS over GF(256) is only valid up to 255-byte codewords, so
+    large symbols (K ≥ 16) split into independent blocks with their bytes interleaved
+    (as QR does): a localized burst of damage spreads evenly across blocks instead of
+    overwhelming one (`src/blocks.js`, shared by every decoder).
+  - **Lighting** — a per-channel levels stretch (black/white points from the image's own
+    percentiles) undoes dim lighting and color casts before any pixel is classified, so a
+    warm ~half-brightness capture decodes like a clean render.
   - **Noise** — the palette-index map is **mode-filtered** (3×3 majority), so salt-and-pepper
     noise — never the local majority — is overwritten by the surrounding cell colour. Heavy
     noise survives even combined with blur and perspective.
@@ -286,9 +298,9 @@ Focused on the **clean-render round trip** (AGENTS.md Track-1):
 IRIS is beta and moving fast. On the near-term list:
 
 - 🚧 **More language implementations / ports** beyond this JavaScript reference.
-- 🚧 **Real-photo capture** — color calibration and lens-distortion handling for camera
-  pipelines (the geometric rectification — rotation, scale, perspective, scratches, noise —
-  already works on rendered/distorted rasters).
+- 🚧 **Real-photo capture** — lens-distortion handling and *spatially varying* illumination
+  for camera pipelines (geometric rectification — rotation, scale, perspective, scratches,
+  noise — and global photometric calibration — dim light, color casts — already work).
 - 🚧 **PNG I/O** (PGM/PPM supported today) and the full **pupil codebook** classifier.
 - 🚧 Continued **decoder robustness & speed** improvements.
 

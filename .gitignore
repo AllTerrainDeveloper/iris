@@ -2,3 +2,7 @@ node_modules/
 package-lock.json
 *.log
 .DS_Store
+data/
+*.ppm
+*.pgm
+__pycache__/

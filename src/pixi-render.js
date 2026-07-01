@@ -15,7 +15,7 @@
 // "pixi.js"`) or rely on a global `PIXI` (CDN). IRIS stays zero-dependency. The
 // v8 renderer initialises asynchronously, so `renderBlobCanvas` returns a Promise.
 import { PALETTE, WHITE_TINT_RGB, FRAME_WIDTH_U } from "./color.js";
-import { imageSizePx } from "./params.js";
+import { imageSizePx, MARKERS, MARKER_R_U } from "./params.js";
 
 const globalPixi = () => (typeof PIXI !== "undefined" ? PIXI : null);
 const resolvePixi = (opts) => (opts && opts.PIXI) || globalPixi();
@@ -212,6 +212,16 @@ function buildFiducials(PX, sym, size) {
   g.circle(c, c, Rp * u).fill(0x000000);
   g.circle(c, c, (Rp - 2) * u).fill(0xffffff);
   g.circle(c, c, 2 * u).fill(0x000000);
+  // RGB calibration markers in the outer quiet zone (same as every other style).
+  if (sym.params.markers) {
+    const R = (Rp + K * dr + sym.params.quiet) * u;
+    for (const m of MARKERS) {
+      const th = (m.deg * Math.PI) / 180;
+      g.circle(c + m.rho * R * Math.sin(th), c - m.rho * R * Math.cos(th), MARKER_R_U * u).fill(
+        (m.rgb[0] << 16) | (m.rgb[1] << 8) | m.rgb[2],
+      );
+    }
+  }
   return g;
 }
 

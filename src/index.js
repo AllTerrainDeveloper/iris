@@ -21,6 +21,11 @@ export {
 // The real-world decoder: recovers center/scale/rotation/perspective + scratches
 // + noise from a distorted RGB grid. Pass { budgetMs } to cap the search time.
 export { decodeColorRobust } from "./robust.js";
+// RGB calibration markers (opt-in `encode(text, { markers: true })`): 3 coloured dots
+// in the outer quiet zone — zero capacity cost — giving the decoder point correspondences
+// for a robust homography plus R/G/B colour references.
+export { decodeColorMarkers, decodeViaHomography, fitHomography } from "./markers.js";
+export { MARKERS, markerFrontal } from "./params.js";
 // Decorative "colour wheel" raster: crisp concentric arcs with blended seams.
 export { renderWheelGrid } from "./wheel-render.js";
 

@@ -61,6 +61,14 @@
             8-color cells (3 bits each) scale outward to beat QR's capacity.
             Type something, get a code. Open source &amp; zero-dependency.
           </p>
+          <nav class="mt-4 flex flex-wrap items-center justify-center gap-2 text-sm">
+            <a
+              href="./detect.html"
+              class="inline-flex items-center gap-1.5 rounded-full border border-slate-700 bg-slate-900/60 px-4 py-1.5 text-slate-300 transition hover:border-indigo-500 hover:text-white"
+            >
+              <span aria-hidden="true">🎯</span> Detector test harness
+            </a>
+          </nav>
         </header>
 
         <!-- Main grid -->
@@ -96,6 +104,11 @@
               <option value="dots">Dots — circles</option>
               <option value="blobs">Blobs — gooey metaballs</option>
             </select>
+
+            <label class="mt-4 flex items-center gap-2 text-sm text-slate-300">
+              <input id="ctlMarkers" type="checkbox" class="rounded border-slate-600 bg-slate-950" />
+              RGB markers <span class="text-xs text-slate-500">(3 colour dots in the outer ring · zero capacity cost)</span>
+            </label>
 
             <!-- Stats -->
             <dl id="stats" class="mt-5 grid grid-cols-2 gap-3 text-sm">

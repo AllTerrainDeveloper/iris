@@ -74,3 +74,12 @@ test("robustness: a radial scratch is corrected by ECC (AGENTS.md M5)", () => {
   }
   assert.equal(decode(grid).text, text);
 });
+
+test("mono decode survives a brightness-shifted low-contrast scan (Otsu)", () => {
+  const { grid } = encode("otsu threshold check", { mono: true });
+  // Ink 140, paper 210: BOTH above a naive fixed 128 threshold.
+  const dim = new Uint8Array(grid.data.length);
+  for (let i = 0; i < grid.data.length; i++) dim[i] = grid.data[i] === 0 ? 140 : 210;
+  const out = decode({ width: grid.width, height: grid.height, data: dim });
+  assert.equal(out.text, "otsu threshold check");
+});

@@ -6,11 +6,16 @@
 // Capacity grows outward (AGENTS.md §2.3): pick the smallest ring schedule that
 // fits, the decoder infers it by trying each and checking RS + CRC.
 
-import { segCounts, ringMidU, imageSizePx } from "./params.js";
-import { rsEncode, rsCorrect } from "./rs.js";
+import { segCounts, ringMidU, imageSizePx, MARKERS, MARKER_R_U } from "./params.js";
 import { bytesToBits, bitsToBytes } from "./bits.js";
-import { FRAME_HEADER, writeFrame, readFrame } from "./frame.js";
+import { FRAME_HEADER, writeFrame } from "./frame.js";
+import { PARITY_LEVELS, parityFor, encodeBlocks, decodeStream } from "./blocks.js";
 import { sector, svgNum } from "./render-svg.js";
+
+// Interleaved RS block structure (AGENTS.md §2.6) — defined in blocks.js,
+// re-exported here because robust.js / markers.js and external callers have
+// always imported the parity schedule from this module.
+export { PARITY_LEVELS, parityFor, blockLayout, encodeBlocks, correctBlocks, decodeStream } from "./blocks.js";
 
 /** Dense color profile (3 bits/cell). */
 export const COLOR_PROFILE = Object.freeze({
@@ -53,13 +58,6 @@ const WHITE_TINT_HEX = `#${WHITE_TINT_RGB.map((v) => v.toString(16).padStart(2, 
 // ring mids, well inside, so sampling is unaffected). Shared by every renderer.
 export const FRAME_WIDTH_U = 0.5;
 
-// Adaptive ECC: small payloads leave spare room in the symbol, so we spend it on
-// parity. Encode picks the HIGHEST level that still fits; the decoder tries each.
-// (Large payloads fall back to 0.3, preserving max capacity.)
-export const PARITY_LEVELS = Object.freeze([0.7, 0.5, 0.3]);
-export const parityFor = (totalBytes, level) =>
-  Math.max(2, Math.min(totalBytes - 1, Math.round(totalBytes * level)));
-
 export function nearestColor(r, g, b) {
   let best = 0;
   let bestD = Infinity;
@@ -80,10 +78,13 @@ export function encodeColor(text, opts = {}) {
   const payload = new TextEncoder().encode(text);
   if (payload.length > 0xffff) throw new Error("payload too large (max 65535 bytes)");
 
+  const useMarkers = !!opts.markers;
   for (const K of SCHEDULES_COLOR) {
     const N = segCounts(K, p);
     const cells = N.reduce((a, b) => a + b, 0);
-    const usable = cells - K; // segment 0 of each ring reserved for the registration ray
+    // Markers live in the quiet zone (no data there), so they reserve NO cells — the
+    // payload is identical with or without them. Only segment 0 (the ray) is reserved.
+    const usable = cells - K;
     const rawBits = usable * p.bitsPerCell;
     const totalBytes = Math.floor(rawBits / 8);
     // Highest parity level whose data area still holds the payload.
@@ -99,7 +100,7 @@ export function encodeColor(text, opts = {}) {
     const dataBytes = totalBytes - parity;
 
     const msg = writeFrame(payload, dataBytes);
-    const code = rsEncode(msg, parity); // totalBytes
+    const code = encodeBlocks(msg, totalBytes, parity); // interleaved RS blocks, ≤255B each
     const bits = bytesToBits(code); // totalBytes*8 <= rawBits
 
     // Pack bits into 3-bit cell values, ring by ring (AGENTS.md §2.5). Segment 0
@@ -119,7 +120,7 @@ export function encodeColor(text, opts = {}) {
 
     return {
       profile: "color",
-      params: { ...p, K, N },
+      params: { ...p, K, N, markers: useMarkers },
       cells: cellVals,
       meta: {
         totalBytes,
@@ -185,7 +186,31 @@ export function renderColorRaster(sym) {
       }
     }
   }
+  if (p.markers) paintMarkers(data, D, cx, cy, p);
   return { width: D, height: D, data };
+}
+
+// Paint the 3 RGB calibration markers in the outer quiet zone (past the frame edge),
+// each a filled disc of its colour. On the blank white ring they're unambiguous to
+// detect, and they touch no data cell. Exported so EVERY raster renderer (plain,
+// wheel, …) paints the same fiducials — `p.u` must be the renderer's pixel scale.
+export function paintMarkers(data, D, cx, cy, p) {
+  const radiusU = p.Rp + p.K * p.dr + p.quiet;
+  const rb = MARKER_R_U * p.u, r0 = Math.ceil(rb);
+  for (const m of MARKERS) {
+    const th = (m.deg * Math.PI) / 180;
+    const mx = cx + m.rho * radiusU * p.u * Math.sin(th);
+    const my = cy - m.rho * radiusU * p.u * Math.cos(th);
+    for (let oy = -r0; oy <= r0; oy++) {
+      for (let ox = -r0; ox <= r0; ox++) {
+        if (ox * ox + oy * oy > rb * rb) continue;
+        const x = Math.round(mx) + ox, y = Math.round(my) + oy;
+        if (x < 0 || y < 0 || x >= D || y >= D) continue;
+        const o = (y * D + x) * 3;
+        data[o] = m.rgb[0]; data[o + 1] = m.rgb[1]; data[o + 2] = m.rgb[2];
+      }
+    }
+  }
 }
 
 /**
@@ -272,7 +297,20 @@ export function renderColorSVG(sym, opts = {}) {
   out.push(`<circle cx="${c}" cy="${c}" r="${Rp * u}"/>`);
   out.push(`<circle cx="${c}" cy="${c}" r="${(Rp - 2) * u}" fill="#fff"/>`);
   out.push(`<circle cx="${c}" cy="${c}" r="${2 * u}"/>`);
-  out.push(`</g></svg>`);
+  out.push(`</g>`);
+  // RGB calibration markers in the outer quiet zone (past the frame edge).
+  if (sym.params.markers) {
+    const radiusU = Rp + K * dr + p.quiet;
+    const rb = MARKER_R_U * u;
+    for (const m of MARKERS) {
+      const th = (m.deg * Math.PI) / 180;
+      const mx = svgNum(c + m.rho * radiusU * u * Math.sin(th));
+      const my = svgNum(c - m.rho * radiusU * u * Math.cos(th));
+      const hex = `#${m.rgb.map((v) => v.toString(16).padStart(2, "0")).join("")}`;
+      out.push(`<circle cx="${mx}" cy="${my}" r="${svgNum(rb)}" fill="${hex}"/>`);
+    }
+  }
+  out.push(`</svg>`);
   return out.join("");
 }
 
@@ -326,16 +364,8 @@ export function decodeColor(grid, opts = {}) {
     const cells = N.reduce((a, b) => a + b, 0) - K;
     const totalBytes = Math.floor((cells * p.bitsPerCell) / 8);
     const code = bitsToBytes(bits.slice(0, totalBytes * 8));
-    for (const level of PARITY_LEVELS) {
-      const parity = parityFor(totalBytes, level);
-      const dataBytes = totalBytes - parity;
-      if (dataBytes < FRAME_HEADER) continue;
-      const corrected = rsCorrect(code, parity);
-      if (!corrected) continue;
-      const text = readFrame(corrected, dataBytes);
-      if (text === null) continue;
-      return { text, params: { K, N } };
-    }
+    const text = decodeStream(code, totalBytes);
+    if (text !== null) return { text, params: { K, N } };
   }
   throw new Error("no decodable IRIS color symbol found");
 }

@@ -13,6 +13,7 @@ import { renderSVG } from "../src/render-svg.js";
 import { renderRaster, gridToPGM, pgmToGrid, gridToPPM, ppmToGrid } from "../src/raster.js";
 import { decodeRaster } from "../src/decode.js";
 import { encodeColor, renderColorSVG, renderColorRaster, decodeColor } from "../src/color.js";
+import { decodeColorRobust } from "../src/robust.js";
 
 const USAGE = `IRIS — radial high-capacity optical code
 
@@ -76,8 +77,16 @@ function cmdDecode(args) {
   const ext = extname(file).toLowerCase();
   const buf = readFileSync(file);
   let text;
-  if (ext === ".ppm") text = decodeColor(ppmToGrid(buf)).text;
-  else if (ext === ".pgm") text = decodeRaster(pgmToGrid(buf)).text;
+  if (ext === ".ppm") {
+    // Fast clean-render path first; fall back to the robust decoder (handles
+    // rotation, perspective, lighting, scratches) for real captures.
+    const grid = ppmToGrid(buf);
+    try {
+      text = decodeColor(grid).text;
+    } catch {
+      text = decodeColorRobust(grid, { budgetMs: 10000 }).text;
+    }
+  } else if (ext === ".pgm") text = decodeRaster(pgmToGrid(buf)).text;
   else fail(`can only decode .ppm (color) or .pgm (mono) rasters (got "${ext}")`);
   process.stdout.write(text + "\n");
 }
